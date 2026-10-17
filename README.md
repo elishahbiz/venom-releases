@@ -88,6 +88,46 @@ venom
 `venom doctor` checks the setup and says what to fix. `venom -p "explain this repo"` runs one prompt
 and exits.
 
+## The Venom daemon
+
+The daemon runs the Venom orchestrator, an OpenAI-compatible gateway in front of Ollama, vLLM,
+llama.cpp or SGLang on your machine, together with a local dashboard on `127.0.0.1`. It needs no
+Docker. From the dashboard you can install Ollama (a link to its download page; you run the
+installer yourself), pull the models that fit your hardware, and connect the machine to
+[Venom Cloud](https://cloud.usevenom.dev) by pasting a join token. It only dials out, and only after
+you connect. Provider keys stay on the machine. More at **https://cloud.usevenom.dev/daemon**.
+
+macOS and Linux (installs, adds a desktop launch entry, starts the daemon and opens its dashboard):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/elishahbiz/venom-releases/main/install-daemon.sh | sh
+```
+
+Windows (beta), in PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/elishahbiz/venom-releases/main/install-daemon.ps1 | iex
+```
+
+The daemon goes to `~/.venom/releases/` with `venom-daemon` linked from `~/.venom/bin`, and keeps
+its data in `~/.venom/daemon` (Windows: `%LOCALAPPDATA%\Venom`). The launch entry is
+`~/Applications/Venom Daemon.app` on macOS, an app launcher entry on Linux, and a Start Menu
+shortcut on Windows. Then use `venom-daemon start`, `stop`, `status`, `open`, `logs` or
+`uninstall`.
+
+| Platform | Download |
+|---|---|
+| macOS, Apple silicon | `Venom-Daemon-<version>-macos-arm64.zip` (the app) or `venom-daemon-<version>-darwin-arm64.tar.gz` |
+| macOS, Intel | `Venom-Daemon-<version>-macos-x64.zip` (the app) or `venom-daemon-<version>-darwin-x64.tar.gz` |
+| Linux x64 (glibc) | `venom-daemon-<version>-linux-x64.tar.gz` |
+| Linux arm64 (glibc) | `venom-daemon-<version>-linux-arm64.tar.gz` |
+| Windows x64 (beta) | `venom-daemon-<version>-windows-x64.zip` |
+
+The macOS app is ad-hoc signed, not notarized. After unzipping it, the first open needs
+right-click, Open (or System Settings, Privacy & Security, Open Anyway). The install script avoids
+this step. On Windows, stopping the daemon ends it at once, and any mesh jobs it was running are
+cut.
+
 ## Windows (beta)
 
 There is no OS sandbox on Windows. venom says so when it starts, asks before shell commands that
