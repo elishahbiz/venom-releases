@@ -97,11 +97,21 @@ installer yourself), pull the models that fit your hardware, and connect the mac
 [Venom Cloud](https://cloud.usevenom.dev) by pasting a join token. It only dials out, and only after
 you connect. Provider keys stay on the machine. More at **https://cloud.usevenom.dev/daemon**.
 
-macOS and Linux (installs, adds a desktop launch entry, starts the daemon and opens its dashboard):
+macOS and Linux (installs, adds a desktop launch entry, turns on start at login, starts the daemon
+and opens its dashboard). Run the same command again to update; your data and settings stay:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/elishahbiz/venom-releases/main/install-daemon.sh | sh
 ```
+
+On Linux, start at login is a systemd user service that also starts the daemon at boot, before
+anyone logs in. If the system asks for it, the installer prints the one `sudo loginctl enable-linger`
+line to run. Where Docker runs and your user can use it, the installer also turns on
+[Venom Computers](https://cloud.usevenom.dev/docs/computers/enable): persistent browsers your agents
+own. The first time builds the computer image on the machine, which takes a few minutes. Without
+Docker it prints how to set Docker up; then run `venom-daemon computers on`. Skip steps with
+`VENOM_DAEMON_NO_AUTOSTART=1` or `VENOM_DAEMON_NO_COMPUTERS=1` on `sh`
+(`curl -fsSL … | VENOM_DAEMON_NO_COMPUTERS=1 sh`).
 
 Windows (beta), in PowerShell:
 
@@ -109,11 +119,19 @@ Windows (beta), in PowerShell:
 irm https://raw.githubusercontent.com/elishahbiz/venom-releases/main/install-daemon.ps1 | iex
 ```
 
+Venom Cloud on your own Linux server (checks the machine, generates the secrets, starts the stack with HTTPS,
+leaves a `venom-cloud` command; <https://cloud.usevenom.dev/docs/deploy/install-server>):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/elishahbiz/venom-releases/main/install-cloud.sh | sh
+```
+
 The daemon goes to `~/.venom/releases/` with `venom-daemon` linked from `~/.venom/bin`, and keeps
 its data in `~/.venom/daemon` (Windows: `%LOCALAPPDATA%\Venom`). The launch entry is
 `~/Applications/Venom Daemon.app` on macOS, an app launcher entry on Linux, and a Start Menu
-shortcut on Windows. Then use `venom-daemon start`, `stop`, `status`, `open`, `logs` or
-`uninstall`.
+shortcut on Windows. Then use `venom-daemon start`, `stop`, `status`, `open`, `logs`, `join`
+(connect to Venom Cloud with a join token), `autostart on|off`, `computers on|off|status` (Linux) or
+`uninstall`. Computers does not run on macOS or Windows yet.
 
 | Platform | Download |
 |---|---|

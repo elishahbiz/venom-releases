@@ -15,9 +15,16 @@
 #   VENOM_BIN_DIR                where the `venom-daemon` link goes (default $VENOM_INSTALL_DIR/bin)
 #   VENOM_DAEMON_NO_START=1      install only: don't start the daemon
 #   VENOM_DAEMON_NO_OPEN=1       start it, but don't open a browser
+#   VENOM_DAEMON_NO_AUTOSTART=1  don't turn on start at login
+#   VENOM_DAEMON_NO_COMPUTERS=1  don't turn on Venom Computers
+#   VENOM_DAEMON_ARCHIVE=<file>  install this venom-daemon-<v>-<os>-<arch>.tar.gz instead of downloading
+#                                (make daemon-install builds one from a checkout)
 #
-# It also adds the desktop launch entry (macOS: ~/Applications/Venom Daemon.app; Linux: an app
-# launcher entry). The daemon keeps its data in ~/.venom/daemon. On Windows, use install-daemon.ps1.
+# Run it again to update: the same command installs the latest release over the old one and keeps
+# the data. It also adds the desktop launch entry (macOS: ~/Applications/Venom Daemon.app; Linux: an
+# app launcher entry), turns on start at login (on Linux a systemd user service, which also starts
+# the daemon at boot) and, on Linux with Docker, Venom Computers. The daemon keeps its data in
+# ~/.venom/daemon. On Windows, use install-daemon.ps1.
 set -eu
 
 RELEASES="https://github.com/elishahbiz/venom-releases/releases"
@@ -81,20 +88,32 @@ main() {
 	tmp="$(mktemp -d "${TMPDIR:-/tmp}/venom-daemon-install.XXXXXX")"
 	trap 'rm -rf "$tmp"' EXIT INT TERM
 
-	say "venom-daemon: finding the ${want:+v}${want:-latest} release for $os-$arch"
-	fetch "$base/SHA256SUMS" "$tmp/SHA256SUMS"
-	line="$(grep -E "^[0-9a-f]{64}  venom-daemon-[0-9][0-9A-Za-z.-]*-$os-$arch\.tar\.gz\$" "$tmp/SHA256SUMS" | head -n 1 || true)"
-	[ -n "$line" ] || err "the release has no daemon archive for $os-$arch"
-	sum="${line%% *}"
-	asset="${line##* }"
+	if [ -n "${VENOM_DAEMON_ARCHIVE:-}" ]; then
+		# A daemon archive built on this machine (make daemon-install): nothing is downloaded.
+		asset="$(basename "$VENOM_DAEMON_ARCHIVE")"
+		printf '%s' "$asset" | grep -Eq "^venom-daemon-[0-9][0-9A-Za-z.-]*-$os-$arch\.tar\.gz\$" ||
+			err "VENOM_DAEMON_ARCHIVE must name a venom-daemon-<version>-$os-$arch.tar.gz"
+		[ -f "$VENOM_DAEMON_ARCHIVE" ] || err "no such file: $VENOM_DAEMON_ARCHIVE"
+		cp "$VENOM_DAEMON_ARCHIVE" "$tmp/$asset"
+		say "venom-daemon: installing $asset from this machine"
+	else
+		say "venom-daemon: finding the ${want:+v}${want:-latest} release for $os-$arch"
+		fetch "$base/SHA256SUMS" "$tmp/SHA256SUMS"
+		line="$(grep -E "^[0-9a-f]{64}  venom-daemon-[0-9][0-9A-Za-z.-]*-$os-$arch\.tar\.gz\$" "$tmp/SHA256SUMS" | head -n 1 || true)"
+		[ -n "$line" ] || err "the release has no daemon archive for $os-$arch"
+		sum="${line%% *}"
+		asset="${line##* }"
+	fi
 	name="${asset%.tar.gz}"
 	version="${name#venom-daemon-}"
 	version="${version%-"$os"-"$arch"}"
-	say "venom-daemon: downloading $asset"
-	fetch "$RELEASES/download/v$version/$asset" "$tmp/$asset"
-	got="$(sha256_of "$tmp/$asset")"
-	[ "$got" = "$sum" ] || err "checksum mismatch for $asset (SHA256 $got, SHA256SUMS says $sum); nothing was installed"
-	say "venom-daemon: SHA256 verified ($sum)"
+	if [ -z "${VENOM_DAEMON_ARCHIVE:-}" ]; then
+		say "venom-daemon: downloading $asset"
+		fetch "$RELEASES/download/v$version/$asset" "$tmp/$asset"
+		got="$(sha256_of "$tmp/$asset")"
+		[ "$got" = "$sum" ] || err "checksum mismatch for $asset (SHA256 $got, SHA256SUMS says $sum); nothing was installed"
+		say "venom-daemon: SHA256 verified ($sum)"
+	fi
 
 	mkdir -p "$tmp/unpack"
 	tar -xzf "$tmp/$asset" -C "$tmp/unpack"
@@ -121,9 +140,9 @@ main() {
 
 	installed="$("$dest/bin/venom-daemon" version 2>&1)" || err "the installed venom-daemon did not run: $installed"
 	"$dest/bin/venom-daemon" shortcut || say "venom-daemon: no desktop launch entry (start it with $bin_dir/venom-daemon)"
-	# Start at login, if it was on, now points at this release.
-	if "$dest/bin/venom-daemon" autostart status 2>/dev/null | grep -q 'true'; then
-		"$dest/bin/venom-daemon" autostart on >/dev/null || true
+	# Start at login (on Linux a systemd user service, which starts it at boot), pointed at this release.
+	if [ "${VENOM_DAEMON_NO_AUTOSTART:-}" != 1 ]; then
+		"$dest/bin/venom-daemon" autostart on || say "venom-daemon: could not turn on start at login (venom-daemon autostart on)"
 	fi
 	say ""
 	say "Venom daemon $installed installed: $bin_dir/venom-daemon -> $dest"
@@ -142,7 +161,23 @@ main() {
 	fi
 	say ""
 	"$dest/bin/venom-daemon" start $open_flag || err "the daemon did not start; see $bin_dir/venom-daemon logs"
+	# Venom Computers (Linux with Docker): on by default. The first time builds the computer image here
+	# (a few minutes); an update keeps the setting and rebuilds the image only when it changed.
+	if [ "$os" = linux ] && [ "${VENOM_DAEMON_NO_COMPUTERS:-}" != 1 ]; then
+		say ""
+		if docker info >/dev/null 2>&1; then
+			say "venom-daemon: turning on Venom Computers"
+			"$dest/bin/venom-daemon" computers on || say "venom-daemon: Computers did not turn on; see the dashboard's Computers card, then run: $bin_dir/venom-daemon computers on"
+		else
+			say "Venom Computers needs Docker that this user can use (docs.docker.com/engine/install; then"
+			say "sudo usermod -aG docker \$USER and log in again). Then run: $bin_dir/venom-daemon computers on"
+		fi
+	fi
 	say ""
+	if "$dest/bin/venom-daemon" status 2>/dev/null | grep -q 'connected to'; then
+		say "Docs: https://cloud.usevenom.dev/daemon"
+		return
+	fi
 	say "Next, in the dashboard: install Ollama if it asks, then Connect to Venom Cloud with a join token"
 	say "from https://cloud.usevenom.dev (Daemons, Connect a daemon). Docs: https://cloud.usevenom.dev/daemon"
 }
