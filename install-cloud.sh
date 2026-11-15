@@ -13,8 +13,14 @@
 # except the downloads from the releases repo, the image registry, the Ollama model you name and, when you
 # agree to it, Docker's own installer. Backups stay on this server's disk.
 #
-#   --dir DIR             install here (default /opt/venom; /opt/venom-db with --database-host)
+# On a Mac (docs/public/deploy/install-mac.md) it makes a --local install in ~/.venom/cloud, with no root: Docker
+# Desktop, OrbStack or Colima must already run (it never installs anything), and a LaunchAgent runs the tick.
+#
+#   --dir DIR             install here (default /opt/venom; /opt/venom-db with --database-host; ~/.venom/cloud on a Mac)
 #   --domain HOST         public host name (DNS must point here); without it the server's IP and a self-signed certificate
+#   --local               only this computer: http://localhost:PORT, published on 127.0.0.1, no certificate (the default
+#                         on a Mac, where --domain and --database-host are refused)
+#   --port N              with --local: the port (default 8080)
 #   --email ADDR          the admin's email (shown again at the end; the setup screen asks for it)
 #   --profile P           standard (Postgres on this server) or production (your own database server, daily backups)
 #   --database-url URL    production: the database (better: VENOM_DATABASE_URL in the environment, out of shell history;
@@ -41,7 +47,7 @@
 #   --channel C           stable (default) or preview (pre-releases too); without --version the channel's newest
 #   --yes                 never ask: take the defaults
 #   --dry-run             everything except starting Docker
-#   --no-docker-install   never offer to install Docker
+#   --no-docker-install   never offer to install Docker (always the case on a Mac)
 #   --skip-dns-check      do not require the domain to resolve
 #   --upgrade             an existing install: preflight, backup, switch to the release's image, health check, rollback on failure
 set -eu
@@ -60,6 +66,7 @@ min_from="" dir="" domain="" email="" version="" image="" auto="" yes=0 dry=0 do
 profile="" dburl="${VENOM_DATABASE_URL:-}" backups="" keep="" bdir="" models="" provider="" pkey="${VENOM_PROVIDER_KEY:-}"
 ollama_url="" ollama_model="" ollama_service="" private_urls="" dbhost=0 listen=""
 dburl_unpooled="${VENOM_DATABASE_URL_UNPOOLED:-}" dbca="" shared="" proxy="" s3="" secrets_only=0 channel=""
+local_mode="" port="" os="$(uname -s)"
 DB_CA_PATH="/etc/venom/database-ca.pem" # where the CA bundle is mounted in the containers
 
 say() { printf '%s\n' "$*"; }
@@ -72,6 +79,8 @@ while [ $# -gt 0 ]; do
 	case "$1" in
 	--dir) dir="${2:?--dir needs a directory}"; shift 2 ;;
 	--domain) domain="${2:?--domain needs a host name}"; shift 2 ;;
+	--local) local_mode=1; shift ;;
+	--port) port="${2:?--port needs a number}"; shift 2 ;;
 	--email) email="${2:?--email needs an address}"; shift 2 ;;
 	--profile) profile="${2:?--profile needs standard or production}"; shift 2 ;;
 	--database-url) dburl="${2:?--database-url needs a postgres:// URL}"; shift 2 ;;
@@ -102,6 +111,15 @@ while [ $# -gt 0 ]; do
 	*) warn "unknown argument: $1"; usage 2 ;;
 	esac
 done
+if [ "$os" = Darwin ]; then
+	# A Mac: a container runtime the user runs (never installed from here), and only this computer, in their home.
+	docker_install=0
+	[ "$secrets_only" = 1 ] || [ "$(id -u)" != 0 ] || die "on a Mac, run this as your own user, not as root (sudo): the install lives in your home folder and starts at your login."
+	[ -z "$domain" ] || die "on a Mac this installer sets up Venom Cloud for this computer only (--local, http://localhost:8080). For a public host name with HTTPS, install it on a Linux server (docs: Install Venom Cloud on a Linux server)."
+	[ "$dbhost" = 0 ] || die "--database-host is for a Linux server. On a Mac, use the bundled Postgres, or your own database server through VENOM_DATABASE_URL with --profile production."
+	[ "$upgrade" = 1 ] || local_mode=1
+	[ -n "$dir" ] || dir="${HOME:?HOME is not set}/.venom/cloud"
+fi
 if [ -z "$dir" ]; then if [ "$dbhost" = 1 ]; then dir="/opt/venom-db"; else dir="/opt/venom"; fi; fi
 case "$channel" in '' | stable | preview) ;; *) die "--channel is stable or preview, not $channel" ;; esac
 
@@ -133,25 +151,48 @@ confirm() { # prompt -> 0 for yes (default no)
 prev() { sed -n "s/^$1=//p" "$dir/.env" 2>/dev/null | tail -1; }
 prevor() { v="$(prev "$1")"; printf "%s\n" "${v:-$2}"; }
 
+# --local: a rerun of a local install stays local, on the port it chose.
+if [ -z "$domain" ] && [ "$(prev VENOM_TLS_MODE)" = local ]; then local_mode=1; fi
+if [ -n "$local_mode" ]; then
+	[ -z "$domain" ] || die "--local and --domain do not go together: --local serves http://localhost only"
+	[ -z "$proxy" ] || die "--local and --behind-proxy do not go together"
+	[ "$dbhost" = 0 ] || die "--local and --database-host do not go together"
+	if [ -z "$port" ]; then a="$(prev CLOUD_ADDRESS)"; case "$a" in http://localhost:*) port="${a##*:}" ;; esac; fi
+	port="${port:-8080}"
+	case "$port" in '' | *[!0-9]* | 0*) die "--port is a port number, 1 to 65535 (not $port)" ;; esac
+	[ "$port" -le 65535 ] || die "--port is a port number, 1 to 65535 (not $port)"
+elif [ -n "$port" ]; then
+	die "--port goes with --local (a public install uses ports 80 and 443)"
+fi
+
 # --- preflight: nothing is touched until it passes ------------------------------
 problems=""
 problem() { problems="$problems
   - $*"; }
 
 preflight() {
-	[ "$(uname -s)" = Linux ] || problem "this installer is for Linux servers (this is $(uname -s)). Use the compose stack from the docs on other systems."
+	case "$os" in Linux | Darwin) ;; *) problem "this installer is for Linux servers and Macs (this is $os). Use the compose stack from the docs on other systems." ;; esac
 	case "$(uname -m)" in x86_64 | amd64 | aarch64 | arm64) ;; *) problem "unsupported CPU architecture $(uname -m): the image is built for amd64 and arm64." ;; esac
 	cpus="${VENOM_PREFLIGHT_CPUS:-$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 1)}"
 	[ "$cpus" -ge 2 ] || problem "needs at least 2 CPU cores (found $cpus). Pick a larger server size."
-	mem="${VENOM_PREFLIGHT_MEM_MB:-$(awk '/^MemTotal:/ {print int($2/1024)}' /proc/meminfo 2>/dev/null || echo 0)}"
+	if [ "$os" = Darwin ]; then
+		mem="${VENOM_PREFLIGHT_MEM_MB:-$(sysctl -n hw.memsize 2>/dev/null | awk '{print int($1/1048576)}')}"
+		mem="${mem:-0}"
+	else
+		mem="${VENOM_PREFLIGHT_MEM_MB:-$(awk '/^MemTotal:/ {print int($2/1024)}' /proc/meminfo 2>/dev/null || echo 0)}"
+	fi
 	[ "$mem" -ge 1800 ] || problem "needs at least 2 GB of memory (found ${mem} MB). Pick a larger server size."
 	mkdir -p "$dir" 2>/dev/null || true
 	disk="${VENOM_PREFLIGHT_DISK_MB:-$(df -Pk "$dir" 2>/dev/null | awk 'NR==2 {print int($4/1024)}' || echo 0)}"
 	[ "${disk:-0}" -ge 10000 ] || problem "needs at least 10 GB free in $dir (found ${disk:-0} MB). Free some disk or add a volume."
 	if [ "$upgrade" = 0 ] && [ "${VENOM_PREFLIGHT_PORTS_FREE:-0}" != 1 ]; then
-		if [ "$dbhost" = 1 ]; then ports=5432; else ports="80 443"; fi
+		if [ "$dbhost" = 1 ]; then ports=5432; elif [ -n "$local_mode" ]; then ports="$port"; else ports="80 443"; fi
+		# A rerun of a local install: the port is this install's own Caddy.
+		[ -z "$local_mode" ] || [ "$(prev CLOUD_ADDRESS)" != "http://localhost:$port" ] || ports=""
 		for p in $ports; do
-			if port_busy "$p"; then problem "port $p is already in use. Stop what listens there (for example another web server or database) and run this again."; fi
+			if ! port_busy "$p"; then :
+			elif [ -n "$local_mode" ]; then problem "port $p is already in use on this computer. Stop what listens there, or pick another port with --port, and run this again."
+			else problem "port $p is already in use. Stop what listens there (for example another web server or database) and run this again."; fi
 		done
 	fi
 	if [ -n "$domain" ] && [ "$skip_dns" = 0 ]; then
@@ -166,12 +207,23 @@ preflight() {
 }
 
 port_busy() {
+	# macOS has neither ss nor a netstat that lists listeners this way.
+	if [ "$os" = Darwin ]; then lsof -nP -iTCP:"$1" -sTCP:LISTEN >/dev/null 2>&1; return; fi
 	if command -v ss >/dev/null 2>&1; then ss -ltn 2>/dev/null | awk -v p=":$1" '$4 ~ p"$" {f=1} END {exit !f}'
 	elif command -v netstat >/dev/null 2>&1; then netstat -ltn 2>/dev/null | awk -v p=":$1" '$4 ~ p"$" {f=1} END {exit !f}'
 	else return 1; fi
 }
 
 ensure_docker() {
+	if [ "$os" = Darwin ]; then
+		# Never installed from here: the user picks and runs the container runtime.
+		command -v docker >/dev/null 2>&1 || die "Docker is not installed. On a Mac, Venom Cloud runs in a container runtime: install Docker Desktop (https://docs.docker.com/desktop/setup/install/mac-install/), OrbStack (https://orbstack.dev) or Colima (https://github.com/abiosoft/colima), start it, and run this again."
+		docker compose version >/dev/null 2>&1 || die "Docker has no compose plugin (docker compose). Docker Desktop and OrbStack include it; with Colima, install docker-compose (brew install docker-compose) and run this again."
+		docker info >/dev/null 2>&1 || die "Docker is not running, or this user cannot use it. Open Docker Desktop or OrbStack, or run colima start, then run this again."
+		vm="$(docker info --format '{{.MemTotal}}' 2>/dev/null | awk '{print int($1/1048576)}')" || vm=""
+		[ -z "$vm" ] || [ "$vm" = 0 ] || [ "$vm" -ge 1800 ] || warn "the container runtime has ${vm} MB of memory; Venom Cloud needs about 2 GB. Give it more (Docker Desktop: Settings, Resources; Colima: colima start --memory 4)."
+		return 0
+	fi
 	if ! command -v docker >/dev/null 2>&1; then
 		[ "$docker_install" = 1 ] || die "Docker is not installed. Install Docker Engine with the compose plugin (https://docs.docker.com/engine/install/), then run this again."
 		confirm "Docker is not installed. Install it now with Docker's own script (https://get.docker.com)?" ||
@@ -205,7 +257,10 @@ answers() {
 		[ -n "$dburl" ] || dburl="$(ask_secret 'Database URL, postgres://user:password@host:5432/database (not shown)')"
 		[ -n "$dburl" ] || die "the production profile needs your database server: set VENOM_DATABASE_URL=postgres://user:password@host:5432/database (or --database-url). To set one up, run this installer with --database-host on that server."
 		case "$dburl" in postgres://* | postgresql://*) ;; *) die "the database URL must start with postgres:// or postgresql://" ;; esac
-		is_loopback "$(dbhost_of "$dburl")" && die "the database URL points at this machine's loopback, which inside a container is the container itself: use the database server's network address."
+		if is_loopback "$(dbhost_of "$dburl")"; then
+			[ "$os" != Darwin ] || die "the database URL points at localhost, which inside a container is the container itself: for a Postgres running on this Mac, use host.docker.internal as the host name."
+			die "the database URL points at this machine's loopback, which inside a container is the container itself: use the database server's network address."
+		fi
 		[ -n "$dburl_unpooled" ] || dburl_unpooled="$(prev VENOM_DATABASE_URL_UNPOOLED)"
 		[ "$dburl_unpooled" != "$dburl" ] || dburl_unpooled=""
 		case "$dburl_unpooled" in '' | postgres://* | postgresql://*) ;; *) die "VENOM_DATABASE_URL_UNPOOLED must start with postgres:// or postgresql://" ;; esac
@@ -240,6 +295,7 @@ answers() {
 		if [ -n "$ollama_url" ]; then
 			case "$ollama_url" in http://* | https://*) ;; *) die "--ollama-url must be an http:// or https:// URL" ;; esac
 			private_urls="$(origin_of "$ollama_url")"
+			is_loopback "${private_urls#*://}" && [ "$os" = Darwin ] && die "--ollama-url points at localhost, which inside a container is the container itself: for an Ollama running on this Mac, use http://host.docker.internal:11434."
 			is_loopback "${private_urls#*://}" && die "--ollama-url points at loopback, which inside a container is the container itself: use this server's network address, or leave --ollama-url out to run Ollama in the stack."
 			ollama_service=""
 		else
@@ -340,9 +396,25 @@ setkey() { # replace or append KEY=VALUE
 }
 ev() { sed -n "s/^$1=//p" "$envf" 2>/dev/null | tail -1; }
 b64() { openssl rand -base64 "$1" | tr -d '\n'; }
-ed25519() { openssl genpkey -algorithm ed25519 -outform DER | base64 | tr -d '\n'; }
+# An Ed25519 private key, PKCS#8 DER in base64 on one line (48 bytes: 64 characters, always this prefix).
+is_ed25519() { case "$1" in MC4CAQAwBQYDK2VwBCIEI*) [ "${#1}" = 64 ] ;; *) return 1 ;; esac; }
+# ed25519: one such key into $key, or the install stops. An openssl without Ed25519 (macOS's LibreSSL) hands it to the
+# openssl inside the Postgres image, which the install pulls anyway: the same key format, no other download.
+ed25519_via=""
+ed25519() {
+	key=""
+	[ "$ed25519_via" = container ] || key="$(openssl genpkey -algorithm ed25519 -outform DER 2>/dev/null | base64 | tr -d '\n')"
+	is_ed25519 "$key" && return 0
+	ed25519_via=container
+	{ command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; } ||
+		die "this openssl ($(openssl version 2>/dev/null | head -1)) cannot generate Ed25519 keys, and Docker is not running to generate them with the openssl in $PG_IMAGE. Start Docker (or put OpenSSL 3 first on PATH) and run this again."
+	# shellcheck disable=SC2016 # runs inside the container
+	key="$(docker run --rm --entrypoint sh "$PG_IMAGE" -c 'openssl genpkey -algorithm ed25519 -outform DER | base64 | tr -d "\n"' 2>/dev/null)" || key=""
+	is_ed25519 "$key" || die "could not generate an Ed25519 signing key (neither this openssl nor the one in $PG_IMAGE made one). Nothing was started; run this again with OpenSSL 3 first on PATH."
+}
 
 open_env() {
+	if [ "$os" = Darwin ]; then command -v openssl >/dev/null 2>&1 || die "needs openssl to generate secrets (macOS ships /usr/bin/openssl; check PATH)"; fi
 	command -v openssl >/dev/null 2>&1 || die "needs openssl to generate secrets (apt-get install openssl)"
 	umask 077
 	mkdir -p "$dir"
@@ -355,11 +427,23 @@ open_env() {
 # Auto Scaling group must hold the same VENOM_VAULT_KEYS) keeps them.
 gen_secrets() {
 	kid="k$(date -u +%Y%m%d)"
+	# The signing keys first: a key that cannot be made stops the install before .env holds anything new. An empty
+	# key an earlier installer left (macOS's openssl made none) is replaced.
+	for k in VENOM_MESH_SIGNING_KEYS VENOM_POLICY_SIGNING_KEY; do
+		case "$(ev "$k")" in *'"pkcs8_b64":""'*) warn "$k in .env holds no key (an earlier install could not make one): generating it now"
+			grep -Ev "^$k=" "$envf" >"$envf.new" || true
+			cat "$envf.new" >"$envf"
+			rm -f "$envf.new" ;;
+		esac
+	done
+	mesh="" policy=""
+	has VENOM_MESH_SIGNING_KEYS || { ed25519; mesh="$key"; }
+	has VENOM_POLICY_SIGNING_KEY || { ed25519; policy="$key"; }
 	put CLOUD_DB_PASSWORD "$(openssl rand -hex 24)"
 	put VENOM_CLOUD_ADMIN_TOKEN "$(b64 48)"
 	put VENOM_VAULT_KEYS "$kid:$(b64 32)"
-	put VENOM_MESH_SIGNING_KEYS "[{\"kid\":\"$kid\",\"pkcs8_b64\":\"$(ed25519)\"}]"
-	put VENOM_POLICY_SIGNING_KEY "{\"kid\":\"policy-$kid\",\"pkcs8_b64\":\"$(ed25519)\"}"
+	put VENOM_MESH_SIGNING_KEYS "[{\"kid\":\"$kid\",\"pkcs8_b64\":\"$mesh\"}]"
+	put VENOM_POLICY_SIGNING_KEY "{\"kid\":\"policy-$kid\",\"pkcs8_b64\":\"$policy\"}"
 	put CRON_SECRET "$(openssl rand -hex 32)"
 	put AUTH_SECRET "$(b64 32)"
 }
@@ -374,6 +458,11 @@ write_env() {
 	elif [ -n "$domain" ]; then
 		setkey CLOUD_ADDRESS "$domain"
 		setkey VENOM_CLOUD_ORIGIN "https://$domain"
+		setkey CLOUD_TLS ""
+	elif [ -n "$local_mode" ]; then
+		# Only this computer, over plain HTTP: the app marks its cookies secure only for an https origin.
+		setkey CLOUD_ADDRESS "http://localhost:$port"
+		setkey VENOM_CLOUD_ORIGIN "http://localhost:$port"
 		setkey CLOUD_TLS ""
 	else
 		ip="$(first_ip)" # VENOM_PUBLIC_IP: behind NAT (AWS)
@@ -400,7 +489,7 @@ write_env() {
 		setkey VENOM_DATABASE_CA ""
 	fi
 	setkey VENOM_SHARED_DATABASE "$shared"
-	if [ -n "$proxy" ]; then setkey VENOM_TLS_MODE proxy; else setkey VENOM_TLS_MODE auto; fi
+	if [ -n "$proxy" ]; then setkey VENOM_TLS_MODE proxy; elif [ -n "$local_mode" ]; then setkey VENOM_TLS_MODE local; else setkey VENOM_TLS_MODE auto; fi
 	setkey VENOM_BACKUP_S3 "$s3"
 	setkey VENOM_BACKUPS "$backups"
 	setkey VENOM_BACKUP_KEEP "$keep"
@@ -422,6 +511,12 @@ write_stack() {
 	o="$(ev VENOM_OLLAMA_SERVICE)"
 	tls="$(ev VENOM_TLS_MODE)"
 	ca="$(ev VENOM_DATABASE_CA)"
+	lport=""
+	if [ "$tls" = local ]; then
+		lport="$(ev CLOUD_ADDRESS)"
+		lport="${lport##*:}"
+		case "$lport" in '' | *[!0-9]*) die "VENOM_TLS_MODE=local needs CLOUD_ADDRESS=http://localhost:PORT in $envf" ;; esac
+	fi
 	# An install from before VENOM_DATABASE_URL_UNPOOLED existed: the same database, as it was.
 	[ "$p" != production ] || [ -n "$(ev VENOM_DATABASE_URL_UNPOOLED)" ] || setkey VENOM_DATABASE_URL_UNPOOLED "$(ev VENOM_DATABASE_URL)"
 	{
@@ -511,7 +606,9 @@ EOF
     image: caddy:2-alpine
     depends_on: [venom-cloud]
 EOF
-		if [ "$tls" = proxy ]; then echo '    ports: ["80:80"]'; else echo '    ports: ["80:80", "443:443"]'; fi
+		if [ "$tls" = proxy ]; then echo '    ports: ["80:80"]'
+		elif [ "$tls" = local ]; then printf '    ports: ["127.0.0.1:%s:%s"]\n' "$lport" "$lport"
+		else echo '    ports: ["80:80", "443:443"]'; fi
 		cat <<'EOF'
     environment:
       CLOUD_ADDRESS: ${CLOUD_ADDRESS}
@@ -538,6 +635,23 @@ EOF
 }
 
 :80 {
+	encode zstd gzip
+	reverse_proxy venom-cloud:3100 {
+		flush_interval -1
+	}
+}
+EOF
+		return
+	fi
+	if [ "$tls" = local ]; then
+		cat >"$dir/Caddyfile" <<'EOF'
+# Only this computer (install-cloud.sh --local): plain HTTP at CLOUD_ADDRESS (http://localhost:PORT), no certificate.
+# The compose file publishes the port on 127.0.0.1 only.
+{
+	auto_https off
+}
+
+{$CLOUD_ADDRESS} {
 	encode zstd gzip
 	reverse_proxy venom-cloud:3100 {
 		flush_interval -1
@@ -581,6 +695,73 @@ write_cron() {
 		warn "cannot write $crond (not root): the console cannot reach this server's updates and backups. Run venom-cloud tick every five minutes from your own scheduler."
 	fi
 }
+
+# On a Mac the same schedule is a per-user LaunchAgent (no cron, no root): `venom-cloud tick --up` at login and every
+# five minutes (--up first starts the stack when Docker runs and none of it does, so the console comes back after a
+# restart; with Docker not running yet it does nothing), and the daily backup at 03:27 when it is on. launchd starts
+# jobs with a bare PATH, so the plist names where Docker Desktop, OrbStack, Colima and Homebrew put docker.
+xml() { printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'; }
+plist() { # LABEL SCHEDULE_XML LOG ARGS...
+	label="$1" sched="$2" log="$3"
+	shift 3
+	printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>' \
+		'<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' \
+		'<!-- Venom Cloud (written by install-cloud.sh; venom-cloud uninstall removes it). -->' \
+		'<plist version="1.0">' '<dict>' \
+		"	<key>Label</key><string>$label</string>" \
+		'	<key>ProgramArguments</key>' '	<array>'
+	for a in "$@"; do printf '		<string>%s</string>\n' "$(xml "$a")"; done
+	printf '%s\n' '	</array>' '	<key>EnvironmentVariables</key>' '	<dict>' \
+		"		<key>PATH</key><string>$(xml "$lpath")</string>" \
+		"		<key>HOME</key><string>$(xml "$HOME")</string>"
+	# A runtime reached through DOCKER_HOST or DOCKER_CONTEXT at install time is reached the same way from launchd.
+	[ -z "${DOCKER_HOST:-}" ] || printf '		<key>DOCKER_HOST</key><string>%s</string>\n' "$(xml "$DOCKER_HOST")"
+	[ -z "${DOCKER_CONTEXT:-}" ] || printf '		<key>DOCKER_CONTEXT</key><string>%s</string>\n' "$(xml "$DOCKER_CONTEXT")"
+	printf '%s\n' '	</dict>' "$sched" \
+		"	<key>StandardOutPath</key><string>$(xml "$log")</string>" \
+		"	<key>StandardErrorPath</key><string>$(xml "$log")</string>" \
+		'</dict>' '</plist>'
+}
+LAUNCH_TICK="dev.usevenom.cloud.tick"
+LAUNCH_BACKUP="dev.usevenom.cloud.backup"
+write_launchd() {
+	agents="${VENOM_LAUNCH_AGENTS_DIR:-$HOME/Library/LaunchAgents}"
+	lctl="${VENOM_LAUNCHCTL:-launchctl}"
+	mkdir -p "$agents" "$dir/logs"
+	lpath=""
+	d_="$(command -v docker 2>/dev/null || true)"
+	[ -z "$d_" ] || lpath="$(dirname "$d_"):"
+	lpath="${lpath}/usr/local/bin:/opt/homebrew/bin:$HOME/.orbstack/bin:$HOME/.docker/bin:$HOME/.rd/bin:/Applications/Docker.app/Contents/Resources/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+	set -- "$LAUNCH_TICK"
+	plist "$LAUNCH_TICK" '	<key>StartInterval</key><integer>300</integer>
+	<key>RunAtLoad</key><true/>' "$dir/logs/tick.log" /bin/sh "$dir/bin/venom-cloud" tick --up >"$agents/$LAUNCH_TICK.plist.new"
+	if [ "$backups" = daily ]; then
+		set -- "$@" "$LAUNCH_BACKUP"
+		plist "$LAUNCH_BACKUP" '	<key>StartCalendarInterval</key>
+	<dict><key>Hour</key><integer>3</integer><key>Minute</key><integer>27</integer></dict>' "$dir/logs/backup.log" /bin/sh "$dir/bin/venom-cloud" backup --scheduled >"$agents/$LAUNCH_BACKUP.plist.new"
+	else
+		unload_agent "$LAUNCH_BACKUP"
+	fi
+	uid="$(id -u)"
+	for l in "$@"; do
+		f="$agents/$l.plist"
+		if cmp -s "$f.new" "$f"; then rm -f "$f.new"; else mv -f "$f.new" "$f"; changed=1; fi
+		# A changed agent is reloaded, except from inside that agent's own run (an upgrade the tick started): booting it
+		# out would stop the upgrade; the new file then takes effect at the next login.
+		if [ "${changed:-}" = 1 ] && [ "${XPC_SERVICE_NAME:-}" != "$l" ]; then "$lctl" bootout "gui/$uid/$l" >/dev/null 2>&1 || true; fi
+		changed=""
+		"$lctl" bootstrap "gui/$uid" "$f" >/dev/null 2>&1 || "$lctl" load -w "$f" >/dev/null 2>&1 || true
+	done
+	case "$auto" in y | yes | YES | Yes) say "automatic updates: on (change the window in the console: Settings, Updates)" ;; esac
+	[ "$backups" != daily ] || say "backups: daily at 03:27 into $bdir, the newest $keep kept"
+	say "starts at login: $agents/$LAUNCH_TICK.plist (logs in $dir/logs)"
+}
+unload_agent() { # LABEL: stop and remove a LaunchAgent this installer wrote
+	[ -f "$agents/$1.plist" ] || return 0
+	"$lctl" bootout "gui/$(id -u)/$1" >/dev/null 2>&1 || "$lctl" unload "$agents/$1.plist" >/dev/null 2>&1 || true
+	rm -f "$agents/$1.plist"
+}
+write_schedule() { if [ "$os" = Darwin ]; then write_launchd; else write_cron; fi; }
 
 # --- a database server for a production install elsewhere (--database-host) ------------------
 database_host() {
@@ -650,10 +831,16 @@ write_helper() {
 #   venom-cloud tick                 what cron runs every five minutes: reports this server to the console, carries out
 #                                    what an admin asked for there (upgrade, roll back, back up, verify restore, export),
 #                                    and runs the automatic update and the scheduled backup when they are due
+#   venom-cloud tick --up            the same, first starting the stack when Docker runs and none of it does (what the
+#                                    macOS LaunchAgent runs at login); Docker not running yet: nothing, until next time
 #   venom-cloud verify-restore [FILE] restore a backup (default: the newest) into a scratch database, check it, drop it
 #   venom-cloud backup s3-key        the access key the S3 copies are signed with, kept in .env (else the instance role)
 set -eu
-here="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
+# This file's real path through any symlink (readlink -f is missing on older macOS).
+me="$0"
+while [ -L "$me" ]; do l_="$(readlink "$me")"; case "$l_" in /*) me="$l_" ;; *) me="$(dirname "$me")/$l_" ;; esac; done
+bin_="$(cd "$(dirname "$me")" && pwd)"
+here="$(cd "$bin_/.." && pwd)"
 dir="${VENOM_CLOUD_DIR:-$here}"
 [ -f "$dir/docker-compose.yml" ] || { echo "venom-cloud: no install in $dir" >&2; exit 1; }
 cd "$dir"
@@ -661,7 +848,7 @@ cd "$dir"
 RELEASE_PUBKEY=""
 RELEASES="${VENOM_RELEASES_URL:-https://github.com/elishahbiz/venom-releases/releases}"
 RAW="${VENOM_RAW_URL:-https://raw.githubusercontent.com/elishahbiz/venom-releases/main}"
-self="$(readlink -f "$0")"
+self="$bin_/$(basename "$me")"
 say() { printf '%s\n' "$*"; }
 die() { printf 'venom-cloud: %s\n' "$*" >&2; exit 1; }
 
@@ -699,6 +886,8 @@ probe() { # one request to /api/status through this server's Caddy
 	# Behind a load balancer (VENOM_TLS_MODE=proxy) Caddy serves plain HTTP; the load balancer holds the certificate.
 	if [ "$(envget VENOM_TLS_MODE)" = proxy ]; then curl -fsS -o /dev/null "http://127.0.0.1/api/status" 2>/dev/null; return; fi
 	origin="$(envget VENOM_CLOUD_ORIGIN)"
+	# A local install (install-cloud.sh --local): plain HTTP at http://localhost:PORT, asked over IPv4 where it is published.
+	if [ "$(envget VENOM_TLS_MODE)" = local ]; then curl -fsS -o /dev/null --resolve "localhost:${origin##*:}:127.0.0.1" "$origin/api/status" 2>/dev/null; return; fi
 	host="${origin#https://}"
 	# A name is resolved to this machine; an IP is asked directly (Caddy's default_sni serves its certificate).
 	case "$host" in *[!0-9.:]*) set -- --resolve "$host:443:127.0.0.1" "$origin/api/status" ;; *) set -- "https://127.0.0.1/api/status" ;; esac
@@ -1341,6 +1530,16 @@ EOF
 		"UPDATE selfhost_requests SET artifact_oid = NULL WHERE artifact_oid IS NOT NULL AND expires_at < now();" "COMMIT;" | sqlq >/dev/null 2>&1 || true
 }
 
+# ensure_up: true when the stack may be asked for the tick. Docker not running yet (Docker Desktop still starting after a
+# login): false, quietly. Running, but no service of the stack is (a restart Docker did not bring them back from): up.
+# Anything already running is left alone, so a restore that stopped only the app is never undone.
+ensure_up() {
+	docker info >/dev/null 2>&1 || { say "Docker is not running yet: nothing to do"; return 1; }
+	[ -z "$(docker compose ps -q --status running 2>/dev/null)" ] || return 0
+	say "starting the stack"
+	docker compose up -d >/dev/null 2>&1 || say "the stack did not start: docker compose logs (in $dir)"
+}
+
 main() {
 cmd="${1:-status}"
 [ $# -eq 0 ] || shift
@@ -1483,11 +1682,25 @@ uninstall)
 		else echo "This deletes the database and the certificates. Run with --keep-data to keep them, or --yes to confirm." >&2; fi
 		exit 2
 	fi
+	if [ "$(uname -s)" = Darwin ]; then
+		# The LaunchAgents go first, so the next tick --up does not start the stack again.
+		agents="${VENOM_LAUNCH_AGENTS_DIR:-$HOME/Library/LaunchAgents}"
+		for l in dev.usevenom.cloud.tick dev.usevenom.cloud.backup; do
+			[ -f "$agents/$l.plist" ] || continue
+			"${VENOM_LAUNCHCTL:-launchctl}" bootout "gui/$(id -u)/$l" >/dev/null 2>&1 || "${VENOM_LAUNCHCTL:-launchctl}" unload "$agents/$l.plist" >/dev/null 2>&1 || true
+			rm -f "$agents/$l.plist"
+		done
+		# The command's link, where install-cloud.sh put it when /usr/local/bin was not writable.
+		t_="$(readlink "$HOME/.local/bin/venom-cloud" 2>/dev/null || true)"
+		[ -z "$t_" ] || [ "$(cd "$(dirname "$t_")" 2>/dev/null && pwd)" != "$dir/bin" ] || rm -f "$HOME/.local/bin/venom-cloud"
+	fi
 	if [ "$keep" = 1 ]; then docker compose down; else docker compose down -v; fi
 	rm -f "${VENOM_CRON_DIR:-/etc/cron.d}/venom-cloud" "${VENOM_CLOUD_BIN_DIR:-/usr/local/bin}/venom-cloud"
 	echo "stopped. $dir stays (your .env and backups)."
 	;;
-	tick) tick ;;
+	tick)
+		if [ "${1:-}" = --up ]; then ensure_up || return 0; fi
+		tick ;;
 verify-restore) verify_restore "${1:-}" ;;
 s3-sign) # s3-sign METHOD PATH PAYLOAD_HASH AMZDATE REGION ACCESS_KEY HEADERS [QUERY] (the secret in S3_SECRET): the SigV4 self-check
 		[ -n "${S3_SECRET:-}" ] || die "s3-sign needs S3_SECRET in the environment"
@@ -1503,7 +1716,13 @@ HELPER_EOF
 	# A new file, not the running one rewritten: a tick that started an upgrade keeps reading the copy it opened.
 	mv -f "$dir/bin/venom-cloud.new" "$dir/bin/venom-cloud"
 	bindir="${VENOM_CLOUD_BIN_DIR:-/usr/local/bin}"
-	if [ -d "$bindir" ] && [ -w "$bindir" ]; then ln -sf "$dir/bin/venom-cloud" "$bindir/venom-cloud"; fi
+	if [ -d "$bindir" ] && [ -w "$bindir" ]; then ln -sf "$dir/bin/venom-cloud" "$bindir/venom-cloud"
+	elif [ "$os" = Darwin ]; then
+		# Apple silicon Macs often have no writable /usr/local/bin: the user's own bin, never sudo.
+		mkdir -p "$HOME/.local/bin"
+		ln -sf "$dir/bin/venom-cloud" "$HOME/.local/bin/venom-cloud"
+		case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) [ "$upgrade" = 1 ] || say "the venom-cloud command is in $HOME/.local/bin, which is not on your PATH: add it (echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >>~/.zprofile), or run $dir/bin/venom-cloud" ;; esac
+	fi
 }
 
 # --- run ---------------------------------------------------------------------------
@@ -1519,7 +1738,7 @@ preflight
 if [ "$dbhost" = 1 ]; then database_host; fi
 
 if [ "$upgrade" = 0 ]; then
-	[ -n "$domain" ] || domain="$(ask 'Domain for this install (empty: this server'"'"'s IP with a self-signed certificate)' '')"
+	[ -n "$domain" ] || [ -n "$local_mode" ] || domain="$(ask 'Domain for this install (empty: this server'"'"'s IP with a self-signed certificate)' '')"
 	[ -n "$email" ] || email="$(ask 'Admin email' '')"
 	answers
 	[ -n "$auto" ] || auto="$(ask 'Turn on automatic updates (patch releases, Sundays 04:00 UTC until you change it in the console)? (yes/no)' 'no')"
@@ -1546,7 +1765,7 @@ if [ "$upgrade" = 1 ] && [ "$dry" = 0 ]; then
 	# An install from before `venom-cloud tick` gets its cron entries now (its weekly upgrade line meant automatic updates).
 	backups="$(prev VENOM_BACKUPS)" bdir="$(prevor VENOM_BACKUP_DIR "$dir/backups")" keep="$(prevor VENOM_BACKUP_KEEP 14)" auto="$(prev VENOM_AUTO_UPDATE)"
 	if [ -z "$auto" ] && grep -q 'upgrade --yes' "${VENOM_CRON_DIR:-/etc/cron.d}/venom-cloud" 2>/dev/null; then auto=yes; setkey VENOM_AUTO_UPDATE yes; fi
-	[ "$rc" != 0 ] || write_cron >/dev/null
+	[ "$rc" != 0 ] || write_schedule >/dev/null
 	exit "$rc"
 fi
 
@@ -1564,14 +1783,17 @@ ok=0
 i=0
 while [ "$i" -lt "${VENOM_HEALTH_TRIES:-60}" ]; do
 	if [ -n "$proxy" ]; then set -- "http://127.0.0.1/api/status"
+	elif [ -n "$local_mode" ]; then set -- --resolve "localhost:$port:127.0.0.1" "$origin/api/status"
 	else case "$host" in *[!0-9.:]*) set -- --resolve "$host:443:127.0.0.1" "$origin/api/status" ;; *) set -- "https://127.0.0.1/api/status" ;; esac; fi
 	if curl -fsSk -o /dev/null "$@" 2>/dev/null; then ok=1; break; fi
 	i=$((i + 1))
 	sleep "${VENOM_HEALTH_SLEEP:-2}"
 done
-[ "$ok" = 1 ] || warn "the app is up but $origin/api/status does not answer through HTTPS yet (a new certificate can take a minute). Check: venom-cloud status"
+if [ "$ok" = 1 ]; then :
+elif [ -n "$local_mode" ]; then warn "the app is up but $origin/api/status does not answer yet. Check: venom-cloud status"
+else warn "the app is up but $origin/api/status does not answer through HTTPS yet (a new certificate can take a minute). Check: venom-cloud status"; fi
 
-write_cron
+write_schedule
 if [ "$ollama_service" = 1 ] && [ -n "$ollama_model" ] && [ "$ollama_model" != none ]; then
 	say "pulling the Ollama model $ollama_model (this can take a few minutes)..."
 	(cd "$dir" && docker compose exec -T ollama ollama pull "$ollama_model" >/dev/null) || warn "could not pull $ollama_model now. Later: venom-cloud models pull $ollama_model"
@@ -1582,7 +1804,8 @@ say "Venom Cloud is running."
 say "  Open:        $origin/setup"
 [ -z "$code" ] || say "  Setup code:  $code   (once; it stops working when the organisation exists)"
 [ -z "$email" ] || say "  Admin email: $email (enter it on the setup screen)"
-[ -n "$domain" ] || say "  The certificate is self-signed: your browser will warn once."
+[ -n "$domain" ] || [ -n "$local_mode" ] || say "  The certificate is self-signed: your browser will warn once."
+[ -z "$local_mode" ] || say "  Local:       only this computer can open it (plain HTTP, published on 127.0.0.1:$port)"
 case "$models" in
 ollama) say "  Models:      Ollama at $private_urls. In the console: Providers, Add, Other (OpenAI-compatible), base URL $private_urls/v1, any key (for example ollama)." ;;
 key) say "  Models:      your $provider key is in .env; its models serve as soon as the organisation exists." ;;
