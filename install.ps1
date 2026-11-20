@@ -88,10 +88,10 @@ function Install-Venom {
 		Write-Host 'shell commands that would run sandboxed on macOS or Linux (yolo keeps asking, auto is off).'
 		Write-Host ''
 		Write-Host 'Next: point venom at a model (Venom Cloud, or any OpenAI-compatible endpoint) and start it:'
-		Write-Host '  $env:VENOM_BASE_URL = "https://cloud.usevenom.dev/v1"'
-		Write-Host '  $env:VENOM_API_KEY = "vck_..."     # from https://cloud.usevenom.dev'
+		Write-Host '  $env:VENOM_BASE_URL = "https://cloud.petawork.ai/v1"'
+		Write-Host '  $env:VENOM_API_KEY = "vck_..."     # from https://cloud.petawork.ai'
 		Write-Host '  venom                             # venom doctor checks the setup'
-		Write-Host 'Docs: https://cloud.usevenom.dev/cli'
+		Write-Host 'Docs: https://cloud.petawork.ai/cli'
 	} finally {
 		Remove-Item -Recurse -Force -LiteralPath $tmp -ErrorAction SilentlyContinue
 	}

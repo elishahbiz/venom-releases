@@ -100,7 +100,7 @@ function Install-VenomDaemon {
 		if ($LASTEXITCODE -ne 0) { throw 'venom-daemon install: the daemon did not start; see venom-daemon logs' }
 		Write-Host ''
 		Write-Host 'Next, in the dashboard: install Ollama if it asks, then Connect to Venom Cloud with a join token'
-		Write-Host 'from https://cloud.usevenom.dev (Daemons, Connect a daemon). Docs: https://cloud.usevenom.dev/daemon'
+		Write-Host 'from https://cloud.petawork.ai (Daemons, Connect a daemon). Docs: https://cloud.petawork.ai/daemon'
 	} finally {
 		Remove-Item -Recurse -Force -LiteralPath $tmp -ErrorAction SilentlyContinue
 	}

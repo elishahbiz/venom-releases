@@ -175,11 +175,11 @@ main() {
 	fi
 	say ""
 	if "$dest/bin/venom-daemon" status 2>/dev/null | grep -q 'connected to'; then
-		say "Docs: https://cloud.usevenom.dev/daemon"
+		say "Docs: https://cloud.petawork.ai/daemon"
 		return
 	fi
 	say "Next, in the dashboard: install Ollama if it asks, then Connect to Venom Cloud with a join token"
-	say "from https://cloud.usevenom.dev (Daemons, Connect a daemon). Docs: https://cloud.usevenom.dev/daemon"
+	say "from https://cloud.petawork.ai (Daemons, Connect a daemon). Docs: https://cloud.petawork.ai/daemon"
 }
 
 main "$@"
