@@ -722,8 +722,8 @@ plist() { # LABEL SCHEDULE_XML LOG ARGS...
 		"	<key>StandardErrorPath</key><string>$(xml "$log")</string>" \
 		'</dict>' '</plist>'
 }
-LAUNCH_TICK="dev.usevenom.cloud.tick"
-LAUNCH_BACKUP="dev.usevenom.cloud.backup"
+LAUNCH_TICK="ai.petawork.cloud.tick"
+LAUNCH_BACKUP="ai.petawork.cloud.backup"
 write_launchd() {
 	agents="${VENOM_LAUNCH_AGENTS_DIR:-$HOME/Library/LaunchAgents}"
 	lctl="${VENOM_LAUNCHCTL:-launchctl}"
@@ -1685,7 +1685,7 @@ uninstall)
 	if [ "$(uname -s)" = Darwin ]; then
 		# The LaunchAgents go first, so the next tick --up does not start the stack again.
 		agents="${VENOM_LAUNCH_AGENTS_DIR:-$HOME/Library/LaunchAgents}"
-		for l in dev.usevenom.cloud.tick dev.usevenom.cloud.backup; do
+		for l in ai.petawork.cloud.tick ai.petawork.cloud.backup; do
 			[ -f "$agents/$l.plist" ] || continue
 			"${VENOM_LAUNCHCTL:-launchctl}" bootout "gui/$(id -u)/$l" >/dev/null 2>&1 || "${VENOM_LAUNCHCTL:-launchctl}" unload "$agents/$l.plist" >/dev/null 2>&1 || true
 			rm -f "$agents/$l.plist"
