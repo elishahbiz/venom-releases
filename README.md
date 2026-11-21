@@ -1,6 +1,6 @@
-# venom
+# petawork
 
-venom is a coding agent for the terminal that you run on your own machine. It reads and edits your
+petawork is a coding agent for the terminal that you run on your own machine. It reads and edits your
 code, runs commands and works through tasks with you, against whichever model you point it at: a
 local server, [Petawork Cloud](https://cloud.petawork.ai), or any OpenAI-compatible endpoint.
 
@@ -33,10 +33,10 @@ irm https://raw.githubusercontent.com/elishahbiz/venom-releases/main/install.ps1
 
 The scripts download from this repository's [releases](https://github.com/elishahbiz/venom-releases/releases)
 only, check the archive's SHA256 against the release's `SHA256SUMS` before unpacking it, and need no
-root or administrator rights. venom goes to `~/.venom/releases/`, with `venom` linked from
-`~/.venom/bin` (Windows: `%USERPROFILE%\.venom\bin\venom.cmd`, added to your user PATH). Set
-`VENOM_VERSION=0.1.0` to install a given version, `VENOM_INSTALL_DIR` to install somewhere else,
-and on macOS or Linux `VENOM_BIN_DIR=/usr/local/bin` to put the link there.
+root or administrator rights. petawork goes to `~/.venom/releases/`, with `petawork` linked from
+`~/.venom/bin` (Windows: `%USERPROFILE%\.venom\bin\petawork.cmd`, added to your user PATH). Set
+`PETAWORK_VERSION=0.1.0` to install a given version, `PETAWORK_INSTALL_DIR` to install somewhere else,
+and on macOS or Linux `PETAWORK_BIN_DIR=/usr/local/bin` to put the link there.
 
 Each archive carries its own Node.js runtime, so there is nothing else to install.
 
@@ -61,31 +61,31 @@ shasum -a 256 -c SHA256SUMS --ignore-missing     # Linux: sha256sum -c SHA256SUM
 Get-FileHash .\venom-<version>-windows-x64.zip -Algorithm SHA256   # compare with its line in SHA256SUMS
 ```
 
-Unpack it anywhere and run `bin/venom` (Windows: `bin\venom.cmd`, or `bin\venom.ps1` from
-PowerShell). Put `bin/` on your PATH to run `venom` from anywhere.
+Unpack it anywhere and run `bin/petawork` (Windows: `bin\petawork.cmd`, or `bin\petawork.ps1` from
+PowerShell). Put `bin/` on your PATH to run `petawork` from anywhere.
 
 ## First run
 
-venom talks to an OpenAI-compatible endpoint, set with two variables.
+petawork talks to an OpenAI-compatible endpoint, set with two variables.
 
 With [Petawork Cloud](https://cloud.petawork.ai), which routes to your own GPUs, trusted nodes and
 your provider keys (create a `vck_` key in the console under Keys):
 
 ```sh
-export VENOM_BASE_URL=https://cloud.petawork.ai/v1
-export VENOM_API_KEY=vck_...
-venom
+export PETAWORK_BASE_URL=https://cloud.petawork.ai/v1
+export PETAWORK_API_KEY=vck_...
+petawork
 ```
 
 Offline, with a local model server such as [Ollama](https://ollama.com):
 
 ```sh
-export VENOM_BASE_URL=http://localhost:11434/v1
-export VENOM_MODEL=qwen3:8b
-venom
+export PETAWORK_BASE_URL=http://localhost:11434/v1
+export PETAWORK_MODEL=qwen3:8b
+petawork
 ```
 
-`venom doctor` checks the setup and says what to fix. `venom -p "explain this repo"` runs one prompt
+`petawork doctor` checks the setup and says what to fix. `petawork -p "explain this repo"` runs one prompt
 and exits.
 
 ## The Petawork daemon
@@ -109,9 +109,9 @@ anyone logs in. If the system asks for it, the installer prints the one `sudo lo
 line to run. Where Docker runs and your user can use it, the installer also turns on
 [Petawork Computers](https://cloud.petawork.ai/docs/computers/enable): persistent browsers your agents
 own. The first time builds the computer image on the machine, which takes a few minutes. Without
-Docker it prints how to set Docker up; then run `venom-daemon computers on`. Skip steps with
-`VENOM_DAEMON_NO_AUTOSTART=1` or `VENOM_DAEMON_NO_COMPUTERS=1` on `sh`
-(`curl -fsSL … | VENOM_DAEMON_NO_COMPUTERS=1 sh`).
+Docker it prints how to set Docker up; then run `petawork-daemon computers on`. Skip steps with
+`PETAWORK_DAEMON_NO_AUTOSTART=1` or `PETAWORK_DAEMON_NO_COMPUTERS=1` on `sh`
+(`curl -fsSL … | PETAWORK_DAEMON_NO_COMPUTERS=1 sh`).
 
 Windows (beta), in PowerShell:
 
@@ -120,26 +120,26 @@ irm https://raw.githubusercontent.com/elishahbiz/venom-releases/main/install-dae
 ```
 
 Petawork Cloud on your own Linux server (checks the machine, generates the secrets, starts the stack with HTTPS,
-leaves a `venom-cloud` command; <https://cloud.petawork.ai/docs/deploy/install-server>):
+leaves a `petawork-cloud` command; <https://cloud.petawork.ai/docs/deploy/install-server>):
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/elishahbiz/venom-releases/main/install-cloud.sh | sh
 ```
 
-The daemon goes to `~/.venom/releases/` with `venom-daemon` linked from `~/.venom/bin`, and keeps
+The daemon goes to `~/.venom/releases/` with `petawork-daemon` linked from `~/.venom/bin`, and keeps
 its data in `~/.venom/daemon` (Windows: `%LOCALAPPDATA%\Venom`). The launch entry is
-`~/Applications/Venom Daemon.app` on macOS, an app launcher entry on Linux, and a Start Menu
-shortcut on Windows. Then use `venom-daemon start`, `stop`, `status`, `open`, `logs`, `join`
+`~/Applications/Petawork Daemon.app` on macOS, an app launcher entry on Linux, and a Start Menu
+shortcut on Windows. Then use `petawork-daemon start`, `stop`, `status`, `open`, `logs`, `join`
 (connect to Petawork Cloud with a join token), `autostart on|off`, `computers on|off|status` (Linux) or
 `uninstall`. Computers does not run on macOS or Windows yet.
 
 | Platform | Download |
 |---|---|
-| macOS, Apple silicon | `Venom-Daemon-<version>-macos-arm64.zip` (the app) or `venom-daemon-<version>-darwin-arm64.tar.gz` |
-| macOS, Intel | `Venom-Daemon-<version>-macos-x64.zip` (the app) or `venom-daemon-<version>-darwin-x64.tar.gz` |
-| Linux x64 (glibc) | `venom-daemon-<version>-linux-x64.tar.gz` |
-| Linux arm64 (glibc) | `venom-daemon-<version>-linux-arm64.tar.gz` |
-| Windows x64 (beta) | `venom-daemon-<version>-windows-x64.zip` |
+| macOS, Apple silicon | `Petawork-Daemon-<version>-macos-arm64.zip` (the app) or `petawork-daemon-<version>-darwin-arm64.tar.gz` |
+| macOS, Intel | `Petawork-Daemon-<version>-macos-x64.zip` (the app) or `petawork-daemon-<version>-darwin-x64.tar.gz` |
+| Linux x64 (glibc) | `petawork-daemon-<version>-linux-x64.tar.gz` |
+| Linux arm64 (glibc) | `petawork-daemon-<version>-linux-arm64.tar.gz` |
+| Windows x64 (beta) | `petawork-daemon-<version>-windows-x64.zip` |
 
 The macOS app is ad-hoc signed, not notarized. After unzipping it, the first open needs
 right-click, Open (or System Settings, Privacy & Security, Open Anyway). The install script avoids
@@ -148,13 +148,13 @@ cut.
 
 ## Windows (beta)
 
-There is no OS sandbox on Windows. venom says so when it starts, asks before shell commands that
+There is no OS sandbox on Windows. petawork says so when it starts, asks before shell commands that
 would run sandboxed on macOS or Linux (yolo keeps asking like accept-edits) and does not offer auto
 mode. It gets less testing than macOS and Linux; if something breaks, tell us at
 joel@elishah.biz.
 
 ## License
 
-venom is MIT licensed; see [LICENSE](LICENSE). Each archive also carries the Node.js licence
+petawork is MIT licensed; see [LICENSE](LICENSE). Each archive also carries the Node.js licence
 (`runtime/LICENSE`) and the licences of the packages it bundles (`THIRD_PARTY_NOTICES`). This
 repository holds release artifacts only; it contains no source code.

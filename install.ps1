@@ -1,4 +1,5 @@
-# Install the venom CLI on Windows (beta) from its public releases. In PowerShell:
+# Install the Petawork CLI (`petawork`, with `venom` as an alias) on Windows (beta) from its public
+# releases. In PowerShell:
 #
 #   irm https://raw.githubusercontent.com/elishahbiz/venom-releases/main/install.ps1 | iex
 #
@@ -6,15 +7,16 @@
 # the release's SHA256SUMS before unpacking anything, and needs no administrator rights. The zip
 # carries its own Node.js runtime, so nothing else is installed.
 #
-#   $env:VENOM_VERSION = '0.1.0'   install that version instead of the latest
-#   $env:VENOM_INSTALL_DIR         where releases are unpacked (default ~\.venom; they go in releases\)
+#   $env:PETAWORK_VERSION = '0.1.0'   install that version instead of the latest
+#   $env:PETAWORK_INSTALL_DIR         where releases are unpacked (default ~\.venom; they go in releases\)
+# The older VENOM_VERSION and VENOM_INSTALL_DIR work too (the PETAWORK_ one wins).
 #
-# venom.cmd lands in <install dir>\bin, which is added to your user PATH.
+# petawork.cmd and venom.cmd land in <install dir>\bin, which is added to your user PATH.
 #
-# Windows support is beta: there is no OS sandbox on Windows (venom uses sandbox-exec on macOS and
-# bubblewrap on Linux), so venom asks before shell commands that would run sandboxed elsewhere.
+# Windows support is beta: there is no OS sandbox on Windows (petawork uses sandbox-exec on macOS and
+# bubblewrap on Linux), so petawork asks before shell commands that would run sandboxed elsewhere.
 
-function Install-Venom {
+function Install-Petawork {
 	$ErrorActionPreference = 'Stop'
 	$ProgressPreference = 'SilentlyContinue'
 	$releases = 'https://github.com/elishahbiz/venom-releases/releases'
@@ -23,42 +25,44 @@ function Install-Venom {
 
 	$arch = $env:PROCESSOR_ARCHITECTURE
 	if ($env:PROCESSOR_ARCHITEW6432) { $arch = $env:PROCESSOR_ARCHITEW6432 }
-	if ($arch -ne 'AMD64' -and $arch -ne 'ARM64') { throw "venom install: no venom build for $arch Windows; there is a build for x64" }
-	if ($arch -eq 'ARM64') { Write-Host 'venom: Windows on ARM runs the x64 build under emulation.' }
+	if ($arch -ne 'AMD64' -and $arch -ne 'ARM64') { throw "petawork install: no Petawork build for $arch Windows; there is a build for x64" }
+	if ($arch -eq 'ARM64') { Write-Host 'petawork: Windows on ARM runs the x64 build under emulation.' }
 
-	$installDir = if ($env:VENOM_INSTALL_DIR) { $env:VENOM_INSTALL_DIR } else { Join-Path $HOME '.venom' }
-	if ($env:VENOM_VERSION) {
-		$want = $env:VENOM_VERSION -replace '^v', ''
-		if ($want -notmatch '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$') { throw "venom install: VENOM_VERSION '$($env:VENOM_VERSION)' is not a version like 0.1.0" }
+	# PETAWORK_X is the new spelling of each VENOM_X; it wins when both are set.
+	$installDir = if ($env:PETAWORK_INSTALL_DIR) { $env:PETAWORK_INSTALL_DIR } elseif ($env:VENOM_INSTALL_DIR) { $env:VENOM_INSTALL_DIR } else { Join-Path $HOME '.venom' }
+	$wantVersion = if ($env:PETAWORK_VERSION) { $env:PETAWORK_VERSION } else { $env:VENOM_VERSION }
+	if ($wantVersion) {
+		$want = $wantVersion -replace '^v', ''
+		if ($want -notmatch '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$') { throw "petawork install: PETAWORK_VERSION '$wantVersion' is not a version like 0.1.0" }
 		$base = "$releases/download/v$want"
 	} else {
 		$base = "$releases/latest/download"
 	}
 
-	$tmp = Join-Path ([IO.Path]::GetTempPath()) ("venom-install-" + [Guid]::NewGuid().ToString('N'))
+	$tmp = Join-Path ([IO.Path]::GetTempPath()) ("petawork-install-" + [Guid]::NewGuid().ToString('N'))
 	New-Item -ItemType Directory -Path $tmp | Out-Null
 	try {
-		Write-Host 'venom: finding the release for windows-x64'
+		Write-Host 'petawork: finding the release for windows-x64'
 		$sumsFile = Join-Path $tmp 'SHA256SUMS'
 		Invoke-WebRequest -UseBasicParsing -Uri "$base/SHA256SUMS" -OutFile $sumsFile
 		$line = Get-Content $sumsFile | Where-Object { $_ -match '^([0-9a-f]{64})  (venom-([0-9][0-9A-Za-z.-]*)-windows-x64\.zip)$' } | Select-Object -First 1
-		if (-not $line) { throw 'venom install: the release has no archive for windows-x64' }
+		if (-not $line) { throw 'petawork install: the release has no archive for windows-x64' }
 		$null = $line -match '^([0-9a-f]{64})  (venom-([0-9][0-9A-Za-z.-]*)-windows-x64\.zip)$'
 		$sum = $Matches[1]; $asset = $Matches[2]; $version = $Matches[3]
 		$name = $asset -replace '\.zip$', ''
 
 		# The archive from its version's own URL, so it matches the SHA256SUMS just read.
-		Write-Host "venom: downloading $asset"
+		Write-Host "petawork: downloading $asset"
 		$zip = Join-Path $tmp $asset
 		Invoke-WebRequest -UseBasicParsing -Uri "$releases/download/v$version/$asset" -OutFile $zip
 		$got = (Get-FileHash -Algorithm SHA256 -LiteralPath $zip).Hash.ToLowerInvariant()
-		if ($got -ne $sum) { throw "venom install: checksum mismatch for $asset (SHA256 $got, SHA256SUMS says $sum); nothing was installed" }
-		Write-Host "venom: SHA256 verified ($sum)"
+		if ($got -ne $sum) { throw "petawork install: checksum mismatch for $asset (SHA256 $got, SHA256SUMS says $sum); nothing was installed" }
+		Write-Host "petawork: SHA256 verified ($sum)"
 
 		$unpack = Join-Path $tmp 'unpack'
 		Expand-Archive -LiteralPath $zip -DestinationPath $unpack
 		$cmd = Join-Path $unpack "$name\bin\venom.cmd"
-		if (-not (Test-Path -LiteralPath $cmd)) { throw "venom install: $asset does not hold $name\bin\venom.cmd" }
+		if (-not (Test-Path -LiteralPath $cmd)) { throw "petawork install: $asset does not hold $name\bin\venom.cmd" }
 
 		$relDir = Join-Path $installDir 'releases'
 		$binDir = Join-Path $installDir 'bin'
@@ -67,34 +71,42 @@ function Install-Venom {
 		if (Test-Path -LiteralPath $dest) { Remove-Item -Recurse -Force -LiteralPath $dest }
 		Move-Item -LiteralPath (Join-Path $unpack $name) -Destination $dest
 
-		# A small shim on PATH that runs this release's launcher.
-		$shim = "@echo off`r`n`"$dest\bin\venom.cmd`" %*`r`nexit /b %ERRORLEVEL%`r`n"
-		[IO.File]::WriteAllText((Join-Path $binDir 'venom.cmd'), $shim, (New-Object Text.ASCIIEncoding))
+		# Small shims on PATH that run this release's launcher: petawork (the command) and venom (its
+		# alias). A release from before the rename has only venom.cmd; petawork runs that one then.
+		$petaworkCmd = "$dest\bin\petawork.cmd"
+		if (-not (Test-Path -LiteralPath $petaworkCmd)) { $petaworkCmd = "$dest\bin\venom.cmd" }
+		foreach ($shimFor in @(@('petawork.cmd', $petaworkCmd), @('venom.cmd', "$dest\bin\venom.cmd"))) {
+			$shim = "@echo off`r`n`"$($shimFor[1])`" %*`r`nexit /b %ERRORLEVEL%`r`n"
+			[IO.File]::WriteAllText((Join-Path $binDir $shimFor[0]), $shim, (New-Object Text.ASCIIEncoding))
+		}
 
 		$userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
 		$parts = @(); if ($userPath) { $parts = $userPath -split ';' | Where-Object { $_ } }
 		if ($parts -notcontains $binDir) {
 			[Environment]::SetEnvironmentVariable('Path', (($parts + $binDir) -join ';'), 'User')
-			Write-Host "venom: added $binDir to your user PATH (new terminals pick it up)"
+			Write-Host "petawork: added $binDir to your user PATH (new terminals pick it up)"
 		}
 		if (($env:Path -split ';') -notcontains $binDir) { $env:Path = "$env:Path;$binDir" }
 
-		$installed = & (Join-Path $binDir 'venom.cmd') --version
-		if ($LASTEXITCODE -ne 0) { throw "venom install: the installed venom did not run: $installed" }
+		$installed = & (Join-Path $binDir 'petawork.cmd') --version
+		if ($LASTEXITCODE -ne 0) { throw "petawork install: the installed petawork did not run: $installed" }
 		Write-Host ''
-		Write-Host "venom $installed installed: $binDir\venom.cmd -> $dest"
+		Write-Host "Petawork $installed installed: $binDir\petawork.cmd -> $dest (venom.cmd works too)"
 		Write-Host ''
-		Write-Host 'Windows support is beta. There is no OS sandbox on Windows, so venom asks before'
+		Write-Host 'Windows support is beta. There is no OS sandbox on Windows, so petawork asks before'
 		Write-Host 'shell commands that would run sandboxed on macOS or Linux (yolo keeps asking, auto is off).'
 		Write-Host ''
-		Write-Host 'Next: point venom at a model (Petawork Cloud, or any OpenAI-compatible endpoint) and start it:'
-		Write-Host '  $env:VENOM_BASE_URL = "https://cloud.petawork.ai/v1"'
-		Write-Host '  $env:VENOM_API_KEY = "vck_..."     # from https://cloud.petawork.ai'
-		Write-Host '  venom                             # venom doctor checks the setup'
+		Write-Host 'Next: point petawork at a model (Petawork Cloud, or any OpenAI-compatible endpoint) and start it:'
+		Write-Host '  $env:PETAWORK_BASE_URL = "https://cloud.petawork.ai/v1"'
+		Write-Host '  $env:PETAWORK_API_KEY = "vck_..."  # from https://cloud.petawork.ai'
+		Write-Host '  petawork                          # petawork doctor checks the setup'
 		Write-Host 'Docs: https://cloud.petawork.ai/cli'
 	} finally {
 		Remove-Item -Recurse -Force -LiteralPath $tmp -ErrorAction SilentlyContinue
 	}
 }
 
-Install-Venom
+# The installer's old name, kept so scripts that call Install-Venom still work.
+function Install-Venom { Install-Petawork @args }
+
+Install-Petawork

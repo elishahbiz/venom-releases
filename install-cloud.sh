@@ -8,8 +8,8 @@
 # minisign and the signing key are there), pulls the venom-cloud image by the digest the release lists,
 # generates every secret on this host into DIR/.env (mode 600), writes a compose stack (Postgres or your own
 # database server, venom-cloud, optionally Ollama, and Caddy with Let's Encrypt, or a self-signed certificate
-# for an IP), starts it, checks it, prints the URL and the one-time setup code, and leaves a `venom-cloud`
-# command (status, logs, backup, restore, upgrade, rollback, models, uninstall). Nothing is sent anywhere
+# for an IP), starts it, checks it, prints the URL and the one-time setup code, and leaves a `petawork-cloud`
+# command, also on PATH as `venom-cloud` (status, logs, backup, restore, upgrade, rollback, models, uninstall). Nothing is sent anywhere
 # except the downloads from the releases repo, the image registry, the Ollama model you name and, when you
 # agree to it, Docker's own installer. Backups stay on this server's disk.
 #
@@ -50,7 +50,16 @@
 #   --no-docker-install   never offer to install Docker (always the case on a Mac)
 #   --skip-dns-check      do not require the domain to resolve
 #   --upgrade             an existing install: preflight, backup, switch to the release's image, health check, rollback on failure
+#
+# Every VENOM_X it reads from the environment (VENOM_DATABASE_URL, VENOM_PROVIDER_KEY, ...) may also be given as
+# PETAWORK_X; that one wins when both are set. What it writes into DIR/.env keeps the VENOM_ names.
 set -eu
+
+# PETAWORK_X → VENOM_X, for the names set in the environment (one shim instead of every read below).
+for n_ in $(env | sed -n 's/^PETAWORK_\([A-Za-z0-9_][A-Za-z0-9_]*\)=.*/\1/p'); do
+	eval "[ -z \"\${PETAWORK_$n_+x}\" ] || { VENOM_$n_=\"\$PETAWORK_$n_\"; export VENOM_$n_; }"
+done
+unset n_
 
 REPO="elishahbiz/venom-releases"
 RELEASES="${VENOM_RELEASES_URL:-https://github.com/$REPO/releases}"
@@ -301,7 +310,7 @@ answers() {
 		else
 			private_urls="http://ollama:11434"
 			ollama_service=1
-			[ -n "$ollama_model" ] || ollama_model="$(ask 'Ollama model to pull now (none: pull one later with venom-cloud models pull)' "$DEFAULT_OLLAMA_MODEL")"
+			[ -n "$ollama_model" ] || ollama_model="$(ask 'Ollama model to pull now (none: pull one later with petawork-cloud models pull)' "$DEFAULT_OLLAMA_MODEL")"
 		fi
 		;;
 	key)
@@ -582,7 +591,7 @@ EOF
 		# The database server's CA bundle, named by the URL's sslrootcert (install-cloud.sh --database-ca).
 		[ -z "$ca" ] || printf '    volumes: ["./database-ca.pem:%s:ro"]\n' "$ca"
 		if [ "$p" = production ]; then
-			# Postgres' client tools for backups and restores (venom-cloud backup / restore); never started by `up`.
+			# Postgres' client tools for backups and restores (petawork-cloud backup / restore); never started by `up`.
 			# The direct (unpooled) URL: pg_dump and a restore must not go through a pooler.
 			cat <<EOF
   pgtools:
@@ -677,26 +686,26 @@ EOF
 EOF
 }
 
-# The cron entries: `venom-cloud tick` every five minutes (it carries out what the console asks for: automatic updates
+# The cron entries: `petawork-cloud tick` every five minutes (it carries out what the console asks for: automatic updates
 # in their window, scheduled backups, Upgrade now, Roll back, Verify restore, the export) and the installer's daily
 # backup (the production default; it steps aside once the console sets a backup schedule).
 write_cron() {
 	crond="${VENOM_CRON_DIR:-/etc/cron.d}"
-	lines="*/5 * * * * root $dir/bin/venom-cloud tick >>/var/log/venom-cloud-tick.log 2>&1"
+	lines="*/5 * * * * root $dir/bin/petawork-cloud tick >>/var/log/venom-cloud-tick.log 2>&1"
 	if [ "$backups" = daily ]; then
 		lines="$lines
-27 3 * * * root $dir/bin/venom-cloud backup --scheduled >>/var/log/venom-cloud-backup.log 2>&1"
+27 3 * * * root $dir/bin/petawork-cloud backup --scheduled >>/var/log/venom-cloud-backup.log 2>&1"
 	fi
 	if [ -d "$crond" ] && [ -w "$crond" ]; then
 		printf '%s\n' "$lines" >"$crond/venom-cloud"
 		case "$auto" in y | yes | YES | Yes) say "automatic updates: on (change the window in the console: Settings, Updates)" ;; esac
 		[ "$backups" != daily ] || say "backups: daily at 03:27 into $bdir, the newest $keep kept"
 	else
-		warn "cannot write $crond (not root): the console cannot reach this server's updates and backups. Run venom-cloud tick every five minutes from your own scheduler."
+		warn "cannot write $crond (not root): the console cannot reach this server's updates and backups. Run petawork-cloud tick every five minutes from your own scheduler."
 	fi
 }
 
-# On a Mac the same schedule is a per-user LaunchAgent (no cron, no root): `venom-cloud tick --up` at login and every
+# On a Mac the same schedule is a per-user LaunchAgent (no cron, no root): `petawork-cloud tick --up` at login and every
 # five minutes (--up first starts the stack when Docker runs and none of it does, so the console comes back after a
 # restart; with Docker not running yet it does nothing), and the daily backup at 03:27 when it is on. launchd starts
 # jobs with a bare PATH, so the plist names where Docker Desktop, OrbStack, Colima and Homebrew put docker.
@@ -706,7 +715,7 @@ plist() { # LABEL SCHEDULE_XML LOG ARGS...
 	shift 3
 	printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>' \
 		'<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' \
-		'<!-- Petawork Cloud (written by install-cloud.sh; venom-cloud uninstall removes it). -->' \
+		'<!-- Petawork Cloud (written by install-cloud.sh; petawork-cloud uninstall removes it). -->' \
 		'<plist version="1.0">' '<dict>' \
 		"	<key>Label</key><string>$label</string>" \
 		'	<key>ProgramArguments</key>' '	<array>'
@@ -734,11 +743,11 @@ write_launchd() {
 	lpath="${lpath}/usr/local/bin:/opt/homebrew/bin:$HOME/.orbstack/bin:$HOME/.docker/bin:$HOME/.rd/bin:/Applications/Docker.app/Contents/Resources/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 	set -- "$LAUNCH_TICK"
 	plist "$LAUNCH_TICK" '	<key>StartInterval</key><integer>300</integer>
-	<key>RunAtLoad</key><true/>' "$dir/logs/tick.log" /bin/sh "$dir/bin/venom-cloud" tick --up >"$agents/$LAUNCH_TICK.plist.new"
+	<key>RunAtLoad</key><true/>' "$dir/logs/tick.log" /bin/sh "$dir/bin/petawork-cloud" tick --up >"$agents/$LAUNCH_TICK.plist.new"
 	if [ "$backups" = daily ]; then
 		set -- "$@" "$LAUNCH_BACKUP"
 		plist "$LAUNCH_BACKUP" '	<key>StartCalendarInterval</key>
-	<dict><key>Hour</key><integer>3</integer><key>Minute</key><integer>27</integer></dict>' "$dir/logs/backup.log" /bin/sh "$dir/bin/venom-cloud" backup --scheduled >"$agents/$LAUNCH_BACKUP.plist.new"
+	<dict><key>Hour</key><integer>3</integer><key>Minute</key><integer>27</integer></dict>' "$dir/logs/backup.log" /bin/sh "$dir/bin/petawork-cloud" backup --scheduled >"$agents/$LAUNCH_BACKUP.plist.new"
 	else
 		unload_agent "$LAUNCH_BACKUP"
 	fi
@@ -807,34 +816,34 @@ EOF
 	exit 0
 }
 
-# --- the venom-cloud command ---------------------------------------------------------
+# --- the petawork-cloud command (venom-cloud, its old name, links to it) ------------------
 write_helper() {
 	mkdir -p "$dir/bin"
-	cat >"$dir/bin/venom-cloud.new" <<'HELPER_EOF'
+	cat >"$dir/bin/petawork-cloud.new" <<'HELPER_EOF'
 #!/bin/sh
-# venom-cloud: manage a Petawork Cloud installed by install-cloud.sh.
-#   venom-cloud status
-#   venom-cloud logs [SERVICE]       follow the logs (venom-cloud, postgres, ollama, caddy)
-#   venom-cloud backup [FILE]        a gzip'd SQL dump of the database (default BACKUP_DIR/venom-cloud-<time>.sql.gz)
-#   venom-cloud backup --scheduled   the same, then keep only the newest VENOM_BACKUP_KEEP (what cron runs)
-#   venom-cloud backup --list        the backups, newest first
-#   venom-cloud restore FILE --yes   replace the database with a backup (a safety backup of the current one first)
-#   venom-cloud upgrade [--yes] [--version X.Y.Z]
+# petawork-cloud (also venom-cloud, its old name): manage a Petawork Cloud installed by install-cloud.sh.
+#   petawork-cloud status
+#   petawork-cloud logs [SERVICE]       follow the logs (venom-cloud, postgres, ollama, caddy)
+#   petawork-cloud backup [FILE]        a gzip'd SQL dump of the database (default BACKUP_DIR/venom-cloud-<time>.sql.gz)
+#   petawork-cloud backup --scheduled   the same, then keep only the newest VENOM_BACKUP_KEEP (what cron runs)
+#   petawork-cloud backup --list        the backups, newest first
+#   petawork-cloud restore FILE --yes   replace the database with a backup (a safety backup of the current one first)
+#   petawork-cloud upgrade [--yes] [--version X.Y.Z]
 #                                    preflight, back up, pull by digest, migrate, health check; rolls back by itself
-#   venom-cloud upgrade --bundle FILE [--allow-unsigned]
+#   petawork-cloud upgrade --bundle FILE [--allow-unsigned]
 #                                    the same from an offline bundle (scripts/release/cloud-bundle.sh): no network
-#   venom-cloud rollback [--restore] [--yes]
+#   petawork-cloud rollback [--restore] [--yes]
 #                                    back to the previous release's image; --restore also restores the pre-upgrade backup
-#   venom-cloud models [list | pull NAME]
+#   petawork-cloud models [list | pull NAME]
 #                                    the models of the Ollama in this stack (install-cloud.sh --models ollama)
-#   venom-cloud uninstall [--keep-data] [--yes]
-#   venom-cloud tick                 what cron runs every five minutes: reports this server to the console, carries out
+#   petawork-cloud uninstall [--keep-data] [--yes]
+#   petawork-cloud tick                 what cron runs every five minutes: reports this server to the console, carries out
 #                                    what an admin asked for there (upgrade, roll back, back up, verify restore, export),
 #                                    and runs the automatic update and the scheduled backup when they are due
-#   venom-cloud tick --up            the same, first starting the stack when Docker runs and none of it does (what the
+#   petawork-cloud tick --up            the same, first starting the stack when Docker runs and none of it does (what the
 #                                    macOS LaunchAgent runs at login); Docker not running yet: nothing, until next time
-#   venom-cloud verify-restore [FILE] restore a backup (default: the newest) into a scratch database, check it, drop it
-#   venom-cloud backup s3-key        the access key the S3 copies are signed with, kept in .env (else the instance role)
+#   petawork-cloud verify-restore [FILE] restore a backup (default: the newest) into a scratch database, check it, drop it
+#   petawork-cloud backup s3-key        the access key the S3 copies are signed with, kept in .env (else the instance role)
 set -eu
 # This file's real path through any symlink (readlink -f is missing on older macOS).
 me="$0"
@@ -842,7 +851,7 @@ while [ -L "$me" ]; do l_="$(readlink "$me")"; case "$l_" in /*) me="$l_" ;; *) 
 bin_="$(cd "$(dirname "$me")" && pwd)"
 here="$(cd "$bin_/.." && pwd)"
 dir="${VENOM_CLOUD_DIR:-$here}"
-[ -f "$dir/docker-compose.yml" ] || { echo "venom-cloud: no install in $dir" >&2; exit 1; }
+[ -f "$dir/docker-compose.yml" ] || { echo "petawork-cloud: no install in $dir" >&2; exit 1; }
 cd "$dir"
 # The release signing key (a minisign public key string); empty until the first signed release.
 RELEASE_PUBKEY=""
@@ -850,7 +859,7 @@ RELEASES="${VENOM_RELEASES_URL:-https://github.com/elishahbiz/venom-releases/rel
 RAW="${VENOM_RAW_URL:-https://raw.githubusercontent.com/elishahbiz/venom-releases/main}"
 self="$bin_/$(basename "$me")"
 say() { printf '%s\n' "$*"; }
-die() { printf 'venom-cloud: %s\n' "$*" >&2; exit 1; }
+die() { printf 'petawork-cloud: %s\n' "$*" >&2; exit 1; }
 
 envget() { sed -n "s/^$1=//p" .env | tail -1; }
 envset() { # KEY VALUE: replace or append, keeping .env's mode
@@ -997,7 +1006,7 @@ preflight() { # [MIN_FROM]
 	cur="$(envget VENOM_CLOUD_VERSION)"
 	if [ -n "${1:-}" ] && [ -n "$cur" ] && older "$cur" "$1"; then problems="$problems
   - this release upgrades only from $1 or newer (you run $cur): upgrade to $1 first, so no migration is skipped."; fi
-	if [ -n "$problems" ]; then printf 'venom-cloud: not ready to upgrade:%s\n' "$problems" >&2; exit 1; fi
+	if [ -n "$problems" ]; then printf 'petawork-cloud: not ready to upgrade:%s\n' "$problems" >&2; exit 1; fi
 }
 
 # apply IMAGE VERSION MIN_FROM NOPULL: the upgrade proper. The running release keeps serving until the new image is here.
@@ -1028,11 +1037,11 @@ apply() {
 		if healthy; then
 			rm -f state/previous.env.keep
 			log_history upgrade "$oldver" "${newver:-$new}" t ""
-			say "upgraded to ${newver:-$new}. The previous release stays one command away: venom-cloud rollback"
+			say "upgraded to ${newver:-$new}. The previous release stays one command away: petawork-cloud rollback"
 			return 0
 		fi
 	fi
-	printf 'venom-cloud: %s did not become healthy; rolling back\n' "$new" >&2
+	printf 'petawork-cloud: %s did not become healthy; rolling back\n' "$new" >&2
 	if [ -f state/previous.env.keep ]; then mv state/previous.env.keep state/previous.env; else rm -f state/previous.env; fi
 	envset VENOM_CLOUD_IMAGE "$old"
 	envset VENOM_CLOUD_VERSION "$oldver"
@@ -1043,9 +1052,9 @@ apply() {
 	if shared; then
 		# Other app servers are running on this database: replacing it under them is a decision for a person.
 		log_history upgrade "$oldver" "${newver:-$new}" f "failed, rollback failed, database shared (not restored)"
-		die "the previous image does not run on the migrated database. Other app servers share it, so it is not restored by itself: stop them, then venom-cloud restore $bk --yes"
+		die "the previous image does not run on the migrated database. Other app servers share it, so it is not restored by itself: stop them, then petawork-cloud restore $bk --yes"
 	fi
-	printf 'venom-cloud: the previous image does not run on the migrated database; restoring %s\n' "$bk" >&2
+	printf 'petawork-cloud: the previous image does not run on the migrated database; restoring %s\n' "$bk" >&2
 	restore_from "$bk"
 	if docker compose up -d --wait >/dev/null 2>&1 && healthy; then
 		log_history upgrade "$oldver" "${newver:-$new}" f "failed, rolled back and restored"
@@ -1068,7 +1077,7 @@ bundle() { # FILE ALLOW_UNSIGNED
 			die "the bundle's SHA256SUMS signature does not verify against the release signing key: do not use this bundle"
 		say "verified the release signature (minisign)"
 	elif [ "$2" = 1 ]; then
-		printf 'venom-cloud: warning: the bundle signature is not checked (--allow-unsigned)\n' >&2
+		printf 'petawork-cloud: warning: the bundle signature is not checked (--allow-unsigned)\n' >&2
 	else
 		die "cannot verify the bundle's signature (needs SHA256SUMS.minisig, minisign and the release key). If you checked the bundle another way, add --allow-unsigned."
 	fi
@@ -1092,7 +1101,7 @@ bundle() { # FILE ALLOW_UNSIGNED
 
 
 # --- the console's requests and schedules (VEN-323) -------------------------------------------------------------
-# The app writes selfhost_settings and selfhost_requests; `venom-cloud tick` reads them through psql here and writes
+# The app writes selfhost_settings and selfhost_requests; `petawork-cloud tick` reads them through psql here and writes
 # selfhost_hosts and selfhost_history back. Before the app has migrated (no tables yet) every query fails quietly.
 
 # load_settings: S_* from the selfhost_settings row (S_row=1), or the defaults (S_row=0).
@@ -1170,7 +1179,7 @@ s3_put() {
 	case "$bucket$key" in *[!A-Za-z0-9._/-]*) echo "the bucket or prefix has characters a backup key cannot use: $2" >&2; return 1 ;; esac
 	[ -n "$bucket" ] || { echo "no bucket in $2" >&2; return 1; }
 	s3_creds || true
-	[ "$S3_SOURCE" != none ] || { echo "no credentials for the bucket: run venom-cloud backup s3-key, or give the server an instance role that may write to it" >&2; return 1; }
+	[ "$S3_SOURCE" != none ] || { echo "no credentials for the bucket: run petawork-cloud backup s3-key, or give the server an instance role that may write to it" >&2; return 1; }
 	region="${S_s3region:-$(envget VENOM_BACKUP_S3_REGION)}"
 	region="${region:-${S3_IMDS_REGION:-us-east-1}}"
 	ep="${S_s3ep:-$(envget VENOM_BACKUP_S3_ENDPOINT)}"
@@ -1358,7 +1367,7 @@ verify_restore() {
 		sqlq host="$(hostname_)" ok="$ok" msg="$msg" >/dev/null 2>&1 || true
 	if [ "$ok" = t ]; then log_history verify "" "" t "$name"; say "$msg"; return 0; fi
 	log_history verify "" "" f "$name failed: $why"
-	echo "venom-cloud: verify restore failed: $why" >&2
+	echo "petawork-cloud: verify restore failed: $why" >&2
 	return 1
 }
 
@@ -1373,7 +1382,7 @@ export_to() {
 	(umask 077 && tar -czf "$work/$name" -C "$work/x" .)
 	bytes="$(wc -c <"$work/$name" | tr -d ' ')"
 	max=$(( ${VENOM_EXPORT_MAX_MB:-2048} * 1048576 ))
-	if [ "$bytes" -gt "$max" ]; then rm -rf "$work"; echo "the export is larger than ${VENOM_EXPORT_MAX_MB:-2048} MB: on the server, run venom-cloud backup and copy the file" >&2; return 1; fi
+	if [ "$bytes" -gt "$max" ]; then rm -rf "$work"; echo "the export is larger than ${VENOM_EXPORT_MAX_MB:-2048} MB: on the server, run petawork-cloud backup and copy the file" >&2; return 1; fi
 	# The archive goes to the psql container's /tmp, then psql's client-side \lo_import stores it and :LASTOID names it.
 	# shellcheck disable=SC2016 # expanded inside the container
 	dbsh 'cat >/tmp/venom-export.tgz && printf "%s\n" "\\lo_import /tmp/venom-export.tgz" "UPDATE selfhost_requests SET artifact_oid = :LASTOID, artifact_name = :'"'"'name'"'"', artifact_bytes = :'"'"'bytes'"'"'::bigint, expires_at = now() + interval '"'"'24 hours'"'"' WHERE id = :'"'"'rid'"'"';" | psql -d "$DB" -X -q -v ON_ERROR_STOP=1 -v rid="$VQ_rid" -v name="$VQ_name" -v bytes="$VQ_bytes" >/dev/null; rc=$?; rm -f /tmp/venom-export.tgz; exit $rc' \
@@ -1490,7 +1499,7 @@ tick() {
 	trap 'rmdir "$dir/state/tick.lock" 2>/dev/null || true' EXIT
 	host="$(hostname_)"
 	load_settings
-	# The console's channel is the one `venom-cloud upgrade` resolves.
+	# The console's channel is the one `petawork-cloud upgrade` resolves.
 	[ "$S_row" = 0 ] || [ "$(envget VENOM_CHANNEL)" = "$S_channel" ] || envset VENOM_CHANNEL "$S_channel"
 	# `install-cloud.sh --auto-update yes`: switched on in the console's settings once (they decide from then on).
 	if [ "$(envget VENOM_AUTO_UPDATE)" = yes ] && [ ! -f state/auto-update-seeded ]; then
@@ -1518,7 +1527,7 @@ EOF
 		say "request $kind ($rid)"
 		if out="$(run_request "$rid" "$kind" "$rver" "$rfile" 2>&1)"; then rok=t; else rok=f; fi
 		printf '%s\n' "$out"
-		msg="$(printf '%s\n' "$out" | sed '/^[[:space:]]*$/d' | tail -1 | sed 's/^venom-cloud: //' | cut -c1-300)"
+		msg="$(printf '%s\n' "$out" | sed '/^[[:space:]]*$/d' | tail -1 | sed -e 's/^petawork-cloud: //' -e 's/^venom-cloud: //' | cut -c1-300)"
 		printf '%s\n' "UPDATE selfhost_requests SET finished_at = now(), ok = :'ok' = 't', message = left(nullif(:'msg', ''), 500) WHERE id = :'rid';" |
 			sqlq rid="$rid" ok="$rok" msg="$msg" >/dev/null 2>&1 || true
 		load_settings
@@ -1565,7 +1574,7 @@ backup)
 	--scheduled)
 		load_settings
 		if [ -n "$S_bsched" ]; then
-			echo "the console sets the backup schedule (Settings, Server backups): venom-cloud tick takes them"
+			echo "the console sets the backup schedule (Settings, Server backups): petawork-cloud tick takes them"
 			exit 0
 		fi
 		if ! claim_day backup; then
@@ -1600,11 +1609,11 @@ backup)
 restore)
 	file="" yes=0
 	for a in "$@"; do
-		case "$a" in --yes | -y) yes=1 ;; -*) echo "venom-cloud: unknown argument $a" >&2; exit 2 ;; *) file="$a" ;; esac
+		case "$a" in --yes | -y) yes=1 ;; -*) echo "petawork-cloud: unknown argument $a" >&2; exit 2 ;; *) file="$a" ;; esac
 	done
-	[ -n "$file" ] || die "usage: venom-cloud restore FILE --yes (venom-cloud backup --list shows the backups)"
+	[ -n "$file" ] || die "usage: petawork-cloud restore FILE --yes (petawork-cloud backup --list shows the backups)"
 	[ -f "$file" ] || die "no such backup: $file"
-	gzip -t "$file" 2>/dev/null || die "$file is not a gzip'd SQL dump from venom-cloud backup"
+	gzip -t "$file" 2>/dev/null || die "$file is not a gzip'd SQL dump from petawork-cloud backup"
 	[ "$yes" = 1 ] || die "restore replaces the database with $file: everything written since it was taken is lost. Add --yes to confirm."
 	safety="$(backup_dir)/pre-restore-$(stamp).sql.gz"
 	backup_to "$safety"
@@ -1627,7 +1636,7 @@ upgrade)
 	if [ -n "$file" ]; then
 		bundle "$file" "$allow"
 	else
-		# The installer resolves the release (SHA256SUMS, signature, digest), then calls `venom-cloud apply`.
+		# The installer resolves the release (SHA256SUMS, signature, digest), then calls `petawork-cloud apply`.
 		inst="$(mktemp "${TMPDIR:-/tmp}/venom-cloud-installer.XXXXXX")"
 		curl -fsSL -o "$inst" "$RAW/install-cloud.sh" || { rm -f "$inst"; die "could not download the installer from $RAW"; }
 		rc=0
@@ -1641,7 +1650,7 @@ apply) apply "${1:?image}" "${2:-}" "${3:-}" "" ;; # called by install-cloud.sh 
 rollback)
 	restore=0 yes=0
 	for a in "$@"; do
-		case "$a" in --restore) restore=1 ;; --yes | -y) yes=1 ;; *) echo "venom-cloud: unknown argument $a" >&2; exit 2 ;; esac
+		case "$a" in --restore) restore=1 ;; --yes | -y) yes=1 ;; *) echo "petawork-cloud: unknown argument $a" >&2; exit 2 ;; esac
 	done
 	[ -f state/previous.env ] || die "there is no previous release recorded: nothing to roll back to."
 	pimg="$(sed -n 's/^IMAGE=//p' state/previous.env)"
@@ -1662,20 +1671,20 @@ rollback)
 	docker compose up -d --wait >/dev/null 2>&1 && healthy || die "the previous release did not become healthy. Look at: docker compose logs venom-cloud"
 	{ printf 'IMAGE=%s\n' "$curimg"; printf 'VERSION=%s\n' "$cur"; printf 'BACKUP=%s\n' "$pbk"; } >state/previous.env
 	log_history rollback "$cur" "${pver:-$pimg}" t ""
-	say "rolled back to ${pver:-$pimg}. Run venom-cloud rollback again to go forward."
+	say "rolled back to ${pver:-$pimg}. Run petawork-cloud rollback again to go forward."
 	;;
 models)
 	[ "$(envget VENOM_OLLAMA_SERVICE)" = 1 ] || die "this install runs no Ollama of its own (install-cloud.sh --models ollama adds one). Providers are managed in the console."
 	case "${1:-list}" in
 	list) docker compose exec -T ollama ollama list ;;
-	pull) docker compose exec -T ollama ollama pull "${2:?usage: venom-cloud models pull NAME}" ;;
-	*) die "usage: venom-cloud models [list | pull NAME]" ;;
+	pull) docker compose exec -T ollama ollama pull "${2:?usage: petawork-cloud models pull NAME}" ;;
+	*) die "usage: petawork-cloud models [list | pull NAME]" ;;
 	esac
 	;;
 uninstall)
 	keep=0 yes=0
 	for a in "$@"; do
-		case "$a" in --keep-data) keep=1 ;; --yes | -y) yes=1 ;; *) echo "venom-cloud: unknown argument $a" >&2; exit 2 ;; esac
+		case "$a" in --keep-data) keep=1 ;; --yes | -y) yes=1 ;; *) echo "petawork-cloud: unknown argument $a" >&2; exit 2 ;; esac
 	done
 	if [ "$keep" = 0 ] && [ "$yes" = 0 ]; then
 		if prod; then echo "This deletes the certificates (your database server is not touched). Run with --keep-data to keep them, or --yes to confirm." >&2
@@ -1690,12 +1699,14 @@ uninstall)
 			"${VENOM_LAUNCHCTL:-launchctl}" bootout "gui/$(id -u)/$l" >/dev/null 2>&1 || "${VENOM_LAUNCHCTL:-launchctl}" unload "$agents/$l.plist" >/dev/null 2>&1 || true
 			rm -f "$agents/$l.plist"
 		done
-		# The command's link, where install-cloud.sh put it when /usr/local/bin was not writable.
-		t_="$(readlink "$HOME/.local/bin/venom-cloud" 2>/dev/null || true)"
-		[ -z "$t_" ] || [ "$(cd "$(dirname "$t_")" 2>/dev/null && pwd)" != "$dir/bin" ] || rm -f "$HOME/.local/bin/venom-cloud"
+		# The command's links, where install-cloud.sh put them when /usr/local/bin was not writable.
+		for c_ in petawork-cloud venom-cloud; do
+			t_="$(readlink "$HOME/.local/bin/$c_" 2>/dev/null || true)"
+			[ -z "$t_" ] || [ "$(cd "$(dirname "$t_")" 2>/dev/null && pwd)" != "$dir/bin" ] || rm -f "$HOME/.local/bin/$c_"
+		done
 	fi
 	if [ "$keep" = 1 ]; then docker compose down; else docker compose down -v; fi
-	rm -f "${VENOM_CRON_DIR:-/etc/cron.d}/venom-cloud" "${VENOM_CLOUD_BIN_DIR:-/usr/local/bin}/venom-cloud"
+	rm -f "${VENOM_CRON_DIR:-/etc/cron.d}/venom-cloud" "${VENOM_CLOUD_BIN_DIR:-/usr/local/bin}/petawork-cloud" "${VENOM_CLOUD_BIN_DIR:-/usr/local/bin}/venom-cloud"
 	echo "stopped. $dir stays (your .env and backups)."
 	;;
 	tick)
@@ -1705,23 +1716,29 @@ verify-restore) verify_restore "${1:-}" ;;
 s3-sign) # s3-sign METHOD PATH PAYLOAD_HASH AMZDATE REGION ACCESS_KEY HEADERS [QUERY] (the secret in S3_SECRET): the SigV4 self-check
 		[ -n "${S3_SECRET:-}" ] || die "s3-sign needs S3_SECRET in the environment"
 		s3_auth "$1" "$2" "$3" "$4" "$5" "$6" "$7" "${8:-}" ;;
-*) echo "usage: venom-cloud status | logs [service] | backup [file | --scheduled | --list | s3-key] | restore file --yes | upgrade [--yes] [--version X.Y.Z] [--bundle file] | rollback [--restore] [--yes] | verify-restore [file] | tick | models [list | pull name] | uninstall [--keep-data] [--yes]" >&2; exit 2 ;;
+*) echo "usage: petawork-cloud status | logs [service] | backup [file | --scheduled | --list | s3-key] | restore file --yes | upgrade [--yes] [--version X.Y.Z] [--bundle file] | rollback [--restore] [--yes] | verify-restore [file] | tick | models [list | pull name] | uninstall [--keep-data] [--yes]" >&2; exit 2 ;;
 esac
 }
 # main is parsed whole before it runs, so an upgrade that rewrites this file under it never runs half of the new one.
 main "$@"
 exit $?
 HELPER_EOF
-	chmod 755 "$dir/bin/venom-cloud.new"
+	chmod 755 "$dir/bin/petawork-cloud.new"
 	# A new file, not the running one rewritten: a tick that started an upgrade keeps reading the copy it opened.
-	mv -f "$dir/bin/venom-cloud.new" "$dir/bin/venom-cloud"
+	mv -f "$dir/bin/petawork-cloud.new" "$dir/bin/petawork-cloud"
+	# The old name: a link, which replaces an older install's own venom-cloud file (one that is running keeps the
+	# copy it opened) and keeps its cron entries, scripts and habits working.
+	ln -sf petawork-cloud "$dir/bin/venom-cloud"
 	bindir="${VENOM_CLOUD_BIN_DIR:-/usr/local/bin}"
-	if [ -d "$bindir" ] && [ -w "$bindir" ]; then ln -sf "$dir/bin/venom-cloud" "$bindir/venom-cloud"
+	if [ -d "$bindir" ] && [ -w "$bindir" ]; then
+		ln -sf "$dir/bin/petawork-cloud" "$bindir/petawork-cloud"
+		ln -sf "$dir/bin/petawork-cloud" "$bindir/venom-cloud"
 	elif [ "$os" = Darwin ]; then
 		# Apple silicon Macs often have no writable /usr/local/bin: the user's own bin, never sudo.
 		mkdir -p "$HOME/.local/bin"
-		ln -sf "$dir/bin/venom-cloud" "$HOME/.local/bin/venom-cloud"
-		case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) [ "$upgrade" = 1 ] || say "the venom-cloud command is in $HOME/.local/bin, which is not on your PATH: add it (echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >>~/.zprofile), or run $dir/bin/venom-cloud" ;; esac
+		ln -sf "$dir/bin/petawork-cloud" "$HOME/.local/bin/petawork-cloud"
+		ln -sf "$dir/bin/petawork-cloud" "$HOME/.local/bin/venom-cloud"
+		case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) [ "$upgrade" = 1 ] || say "the petawork-cloud command is in $HOME/.local/bin, which is not on your PATH: add it (echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >>~/.zprofile), or run $dir/bin/petawork-cloud" ;; esac
 	fi
 }
 
@@ -1761,8 +1778,8 @@ if [ "$upgrade" = 1 ] && [ "$dry" = 0 ]; then
 	# Preflight, backup, pull by digest, migrate, health check and the automatic rollback live in the helper, which
 	# an offline bundle uses too.
 	rc=0
-	"$dir/bin/venom-cloud" apply "$image" "$version" "$min_from" || rc=$?
-	# An install from before `venom-cloud tick` gets its cron entries now (its weekly upgrade line meant automatic updates).
+	"$dir/bin/petawork-cloud" apply "$image" "$version" "$min_from" || rc=$?
+	# An install from before `petawork-cloud tick` gets its cron entries now (its weekly upgrade line meant automatic updates).
 	backups="$(prev VENOM_BACKUPS)" bdir="$(prevor VENOM_BACKUP_DIR "$dir/backups")" keep="$(prevor VENOM_BACKUP_KEEP 14)" auto="$(prev VENOM_AUTO_UPDATE)"
 	if [ -z "$auto" ] && grep -q 'upgrade --yes' "${VENOM_CRON_DIR:-/etc/cron.d}/venom-cloud" 2>/dev/null; then auto=yes; setkey VENOM_AUTO_UPDATE yes; fi
 	[ "$rc" != 0 ] || write_schedule >/dev/null
@@ -1770,7 +1787,7 @@ if [ "$upgrade" = 1 ] && [ "$dry" = 0 ]; then
 fi
 
 if [ "$dry" = 1 ]; then
-	say "dry run: wrote $dir (.env, docker-compose.yml, Caddyfile, bin/venom-cloud); Docker was not started"
+	say "dry run: wrote $dir (.env, docker-compose.yml, Caddyfile, bin/petawork-cloud); Docker was not started"
 	exit 0
 fi
 
@@ -1790,13 +1807,13 @@ while [ "$i" -lt "${VENOM_HEALTH_TRIES:-60}" ]; do
 	sleep "${VENOM_HEALTH_SLEEP:-2}"
 done
 if [ "$ok" = 1 ]; then :
-elif [ -n "$local_mode" ]; then warn "the app is up but $origin/api/status does not answer yet. Check: venom-cloud status"
-else warn "the app is up but $origin/api/status does not answer through HTTPS yet (a new certificate can take a minute). Check: venom-cloud status"; fi
+elif [ -n "$local_mode" ]; then warn "the app is up but $origin/api/status does not answer yet. Check: petawork-cloud status"
+else warn "the app is up but $origin/api/status does not answer through HTTPS yet (a new certificate can take a minute). Check: petawork-cloud status"; fi
 
 write_schedule
 if [ "$ollama_service" = 1 ] && [ -n "$ollama_model" ] && [ "$ollama_model" != none ]; then
 	say "pulling the Ollama model $ollama_model (this can take a few minutes)..."
-	(cd "$dir" && docker compose exec -T ollama ollama pull "$ollama_model" >/dev/null) || warn "could not pull $ollama_model now. Later: venom-cloud models pull $ollama_model"
+	(cd "$dir" && docker compose exec -T ollama ollama pull "$ollama_model" >/dev/null) || warn "could not pull $ollama_model now. Later: petawork-cloud models pull $ollama_model"
 fi
 code="$(cd "$dir" && docker compose logs --no-log-prefix venom-cloud 2>&1 | grep -oE '[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}' | head -1 || true)"
 say ""
@@ -1813,7 +1830,7 @@ key) say "  Models:      your $provider key is in .env; its models serve as soon
 esac
 [ "$profile" != production ] || say "  Database:    $(dbhost_of "$dburl") (your database server${shared:+, shared with the other app servers})"
 [ -z "$proxy" ] || say "  HTTPS:       at your load balancer; this server answers plain HTTP on port 80"
-[ "$backups" != daily ] || say "  Backups:     daily into $bdir, the newest $keep kept. Restore: venom-cloud restore FILE --yes"
+[ "$backups" != daily ] || say "  Backups:     daily into $bdir, the newest $keep kept. Restore: petawork-cloud restore FILE --yes"
 say "  Secrets:     $dir/.env (mode 600). Back it up: VENOM_VAULT_KEYS opens what the vault sealed."
-say "  Manage:      venom-cloud status | logs | backup | restore | upgrade | rollback | uninstall --keep-data"
+say "  Manage:      petawork-cloud status | logs | backup | restore | upgrade | rollback | uninstall --keep-data"
 exit 0
