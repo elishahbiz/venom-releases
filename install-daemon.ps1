@@ -1,4 +1,4 @@
-# Install the Venom daemon on Windows (beta) from its public releases, then start it and open its
+# Install the Petawork daemon on Windows (beta) from its public releases, then start it and open its
 # dashboard. In PowerShell:
 #
 #   irm https://raw.githubusercontent.com/elishahbiz/venom-releases/main/install-daemon.ps1 | iex
@@ -13,7 +13,7 @@
 #   $env:VENOM_DAEMON_NO_START = '1' install only
 #   $env:VENOM_DAEMON_NO_OPEN = '1'  start it, but don't open a browser
 #
-# It adds a Start Menu shortcut, Venom Daemon, and venom-daemon.cmd in <install dir>\bin (on your
+# It adds a Start Menu shortcut, Petawork Daemon, and venom-daemon.cmd in <install dir>\bin (on your
 # user PATH). The daemon keeps its data in %LOCALAPPDATA%\Venom.
 #
 # Windows support is beta: stopping the daemon ends it at once (running mesh jobs are cut).
@@ -90,8 +90,8 @@ function Install-VenomDaemon {
 		& $daemon shortcut
 		if ((& $daemon autostart status) -match 'true') { & $daemon autostart on *> $null }
 		Write-Host ''
-		Write-Host "Venom daemon $installed installed: $shimPath -> $dest"
-		Write-Host 'Launch it any time from the Start Menu: Venom Daemon.'
+		Write-Host "Petawork daemon $installed installed: $shimPath -> $dest"
+		Write-Host 'Launch it any time from the Start Menu: Petawork Daemon.'
 		Write-Host 'Windows support is beta: stopping the daemon ends it at once (running mesh jobs are cut).'
 
 		if ($env:VENOM_DAEMON_NO_START -eq '1') { Write-Host "Start it with: venom-daemon"; return }
@@ -99,7 +99,7 @@ function Install-VenomDaemon {
 		if ($env:VENOM_DAEMON_NO_OPEN -eq '1') { & $daemon start --no-open } else { & $daemon start }
 		if ($LASTEXITCODE -ne 0) { throw 'venom-daemon install: the daemon did not start; see venom-daemon logs' }
 		Write-Host ''
-		Write-Host 'Next, in the dashboard: install Ollama if it asks, then Connect to Venom Cloud with a join token'
+		Write-Host 'Next, in the dashboard: install Ollama if it asks, then Connect to Petawork Cloud with a join token'
 		Write-Host 'from https://cloud.petawork.ai (Daemons, Connect a daemon). Docs: https://cloud.petawork.ai/daemon'
 	} finally {
 		Remove-Item -Recurse -Force -LiteralPath $tmp -ErrorAction SilentlyContinue

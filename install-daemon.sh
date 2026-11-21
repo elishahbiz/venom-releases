@@ -1,5 +1,5 @@
 #!/bin/sh
-# Install the Venom daemon on macOS or Linux from its public releases, then start it and open its
+# Install the Petawork daemon on macOS or Linux from its public releases, then start it and open its
 # dashboard:
 #
 #   curl -fsSL https://raw.githubusercontent.com/elishahbiz/venom-releases/main/install-daemon.sh | sh
@@ -16,14 +16,14 @@
 #   VENOM_DAEMON_NO_START=1      install only: don't start the daemon
 #   VENOM_DAEMON_NO_OPEN=1       start it, but don't open a browser
 #   VENOM_DAEMON_NO_AUTOSTART=1  don't turn on start at login
-#   VENOM_DAEMON_NO_COMPUTERS=1  don't turn on Venom Computers
+#   VENOM_DAEMON_NO_COMPUTERS=1  don't turn on Petawork Computers
 #   VENOM_DAEMON_ARCHIVE=<file>  install this venom-daemon-<v>-<os>-<arch>.tar.gz instead of downloading
 #                                (make daemon-install builds one from a checkout)
 #
 # Run it again to update: the same command installs the latest release over the old one and keeps
 # the data. It also adds the desktop launch entry (macOS: ~/Applications/Venom Daemon.app; Linux: an
 # app launcher entry), turns on start at login (on Linux a systemd user service, which also starts
-# the daemon at boot) and, on Linux with Docker, Venom Computers. The daemon keeps its data in
+# the daemon at boot) and, on Linux with Docker, Petawork Computers. The daemon keeps its data in
 # ~/.venom/daemon. On Windows, use install-daemon.ps1.
 set -eu
 
@@ -145,10 +145,10 @@ main() {
 		"$dest/bin/venom-daemon" autostart on || say "venom-daemon: could not turn on start at login (venom-daemon autostart on)"
 	fi
 	say ""
-	say "Venom daemon $installed installed: $bin_dir/venom-daemon -> $dest"
+	say "Petawork daemon $installed installed: $bin_dir/venom-daemon -> $dest"
 	case "$os" in
-	darwin) say "Launch it any time from Applications: Venom Daemon." ;;
-	linux) say "Launch it any time from your app launcher: Venom Daemon." ;;
+	darwin) say "Launch it any time from Applications: Petawork Daemon." ;;
+	linux) say "Launch it any time from your app launcher: Petawork Daemon." ;;
 	esac
 
 	if [ "${VENOM_DAEMON_NO_START:-}" = 1 ]; then
@@ -161,15 +161,15 @@ main() {
 	fi
 	say ""
 	"$dest/bin/venom-daemon" start $open_flag || err "the daemon did not start; see $bin_dir/venom-daemon logs"
-	# Venom Computers (Linux with Docker): on by default. The first time builds the computer image here
+	# Petawork Computers (Linux with Docker): on by default. The first time builds the computer image here
 	# (a few minutes); an update keeps the setting and rebuilds the image only when it changed.
 	if [ "$os" = linux ] && [ "${VENOM_DAEMON_NO_COMPUTERS:-}" != 1 ]; then
 		say ""
 		if docker info >/dev/null 2>&1; then
-			say "venom-daemon: turning on Venom Computers"
+			say "venom-daemon: turning on Petawork Computers"
 			"$dest/bin/venom-daemon" computers on || say "venom-daemon: Computers did not turn on; see the dashboard's Computers card, then run: $bin_dir/venom-daemon computers on"
 		else
-			say "Venom Computers needs Docker that this user can use (docs.docker.com/engine/install; then"
+			say "Petawork Computers needs Docker that this user can use (docs.docker.com/engine/install; then"
 			say "sudo usermod -aG docker \$USER and log in again). Then run: $bin_dir/venom-daemon computers on"
 		fi
 	fi
@@ -178,7 +178,7 @@ main() {
 		say "Docs: https://cloud.petawork.ai/daemon"
 		return
 	fi
-	say "Next, in the dashboard: install Ollama if it asks, then Connect to Venom Cloud with a join token"
+	say "Next, in the dashboard: install Ollama if it asks, then Connect to Petawork Cloud with a join token"
 	say "from https://cloud.petawork.ai (Daemons, Connect a daemon). Docs: https://cloud.petawork.ai/daemon"
 }
 

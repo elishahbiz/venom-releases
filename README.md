@@ -2,7 +2,7 @@
 
 venom is a coding agent for the terminal that you run on your own machine. It reads and edits your
 code, runs commands and works through tasks with you, against whichever model you point it at: a
-local server, [Venom Cloud](https://cloud.petawork.ai), or any OpenAI-compatible endpoint.
+local server, [Petawork Cloud](https://cloud.petawork.ai), or any OpenAI-compatible endpoint.
 
 - **Permissions you can read.** Four modes, from plan (read-only) to yolo, and shell commands are
   parsed and checked against allow, ask and deny rules before they run.
@@ -68,7 +68,7 @@ PowerShell). Put `bin/` on your PATH to run `venom` from anywhere.
 
 venom talks to an OpenAI-compatible endpoint, set with two variables.
 
-With [Venom Cloud](https://cloud.petawork.ai), which routes to your own GPUs, trusted nodes and
+With [Petawork Cloud](https://cloud.petawork.ai), which routes to your own GPUs, trusted nodes and
 your provider keys (create a `vck_` key in the console under Keys):
 
 ```sh
@@ -88,13 +88,13 @@ venom
 `venom doctor` checks the setup and says what to fix. `venom -p "explain this repo"` runs one prompt
 and exits.
 
-## The Venom daemon
+## The Petawork daemon
 
-The daemon runs the Venom orchestrator, an OpenAI-compatible gateway in front of Ollama, vLLM,
+The daemon runs the Petawork orchestrator, an OpenAI-compatible gateway in front of Ollama, vLLM,
 llama.cpp or SGLang on your machine, together with a local dashboard on `127.0.0.1`. It needs no
 Docker. From the dashboard you can install Ollama (a link to its download page; you run the
 installer yourself), pull the models that fit your hardware, and connect the machine to
-[Venom Cloud](https://cloud.petawork.ai) by pasting a join token. It only dials out, and only after
+[Petawork Cloud](https://cloud.petawork.ai) by pasting a join token. It only dials out, and only after
 you connect. Provider keys stay on the machine. More at **https://cloud.petawork.ai/daemon**.
 
 macOS and Linux (installs, adds a desktop launch entry, turns on start at login, starts the daemon
@@ -107,7 +107,7 @@ curl -fsSL https://raw.githubusercontent.com/elishahbiz/venom-releases/main/inst
 On Linux, start at login is a systemd user service that also starts the daemon at boot, before
 anyone logs in. If the system asks for it, the installer prints the one `sudo loginctl enable-linger`
 line to run. Where Docker runs and your user can use it, the installer also turns on
-[Venom Computers](https://cloud.petawork.ai/docs/computers/enable): persistent browsers your agents
+[Petawork Computers](https://cloud.petawork.ai/docs/computers/enable): persistent browsers your agents
 own. The first time builds the computer image on the machine, which takes a few minutes. Without
 Docker it prints how to set Docker up; then run `venom-daemon computers on`. Skip steps with
 `VENOM_DAEMON_NO_AUTOSTART=1` or `VENOM_DAEMON_NO_COMPUTERS=1` on `sh`
@@ -119,7 +119,7 @@ Windows (beta), in PowerShell:
 irm https://raw.githubusercontent.com/elishahbiz/venom-releases/main/install-daemon.ps1 | iex
 ```
 
-Venom Cloud on your own Linux server (checks the machine, generates the secrets, starts the stack with HTTPS,
+Petawork Cloud on your own Linux server (checks the machine, generates the secrets, starts the stack with HTTPS,
 leaves a `venom-cloud` command; <https://cloud.petawork.ai/docs/deploy/install-server>):
 
 ```sh
@@ -130,7 +130,7 @@ The daemon goes to `~/.venom/releases/` with `venom-daemon` linked from `~/.veno
 its data in `~/.venom/daemon` (Windows: `%LOCALAPPDATA%\Venom`). The launch entry is
 `~/Applications/Venom Daemon.app` on macOS, an app launcher entry on Linux, and a Start Menu
 shortcut on Windows. Then use `venom-daemon start`, `stop`, `status`, `open`, `logs`, `join`
-(connect to Venom Cloud with a join token), `autostart on|off`, `computers on|off|status` (Linux) or
+(connect to Petawork Cloud with a join token), `autostart on|off`, `computers on|off|status` (Linux) or
 `uninstall`. Computers does not run on macOS or Windows yet.
 
 | Platform | Download |

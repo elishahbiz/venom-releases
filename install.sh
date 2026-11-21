@@ -123,7 +123,7 @@ main() {
 		;;
 	esac
 	say ""
-	say "Next: point venom at a model (Venom Cloud, or any OpenAI-compatible endpoint) and start it:"
+	say "Next: point venom at a model (Petawork Cloud, or any OpenAI-compatible endpoint) and start it:"
 	say "  export VENOM_BASE_URL=https://cloud.petawork.ai/v1"
 	say "  export VENOM_API_KEY=vck_...        # from https://cloud.petawork.ai"
 	say "  venom                               # venom doctor checks the setup"

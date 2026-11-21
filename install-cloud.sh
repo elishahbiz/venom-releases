@@ -1,5 +1,5 @@
 #!/bin/sh
-# Install Venom Cloud on a Linux server you own (VEN-284, VEN-319, docs/public/deploy/install-server.md).
+# Install Petawork Cloud on a Linux server you own (VEN-284, VEN-319, docs/public/deploy/install-server.md).
 #
 #   curl -fsSL https://raw.githubusercontent.com/elishahbiz/venom-releases/main/install-cloud.sh | sh
 #   sh install-cloud.sh --domain cloud.example.com --email you@example.com --yes
@@ -115,7 +115,7 @@ if [ "$os" = Darwin ]; then
 	# A Mac: a container runtime the user runs (never installed from here), and only this computer, in their home.
 	docker_install=0
 	[ "$secrets_only" = 1 ] || [ "$(id -u)" != 0 ] || die "on a Mac, run this as your own user, not as root (sudo): the install lives in your home folder and starts at your login."
-	[ -z "$domain" ] || die "on a Mac this installer sets up Venom Cloud for this computer only (--local, http://localhost:8080). For a public host name with HTTPS, install it on a Linux server (docs: Install Venom Cloud on a Linux server)."
+	[ -z "$domain" ] || die "on a Mac this installer sets up Petawork Cloud for this computer only (--local, http://localhost:8080). For a public host name with HTTPS, install it on a Linux server (docs: Install Petawork Cloud on a Linux server)."
 	[ "$dbhost" = 0 ] || die "--database-host is for a Linux server. On a Mac, use the bundled Postgres, or your own database server through VENOM_DATABASE_URL with --profile production."
 	[ "$upgrade" = 1 ] || local_mode=1
 	[ -n "$dir" ] || dir="${HOME:?HOME is not set}/.venom/cloud"
@@ -217,11 +217,11 @@ port_busy() {
 ensure_docker() {
 	if [ "$os" = Darwin ]; then
 		# Never installed from here: the user picks and runs the container runtime.
-		command -v docker >/dev/null 2>&1 || die "Docker is not installed. On a Mac, Venom Cloud runs in a container runtime: install Docker Desktop (https://docs.docker.com/desktop/setup/install/mac-install/), OrbStack (https://orbstack.dev) or Colima (https://github.com/abiosoft/colima), start it, and run this again."
+		command -v docker >/dev/null 2>&1 || die "Docker is not installed. On a Mac, Petawork Cloud runs in a container runtime: install Docker Desktop (https://docs.docker.com/desktop/setup/install/mac-install/), OrbStack (https://orbstack.dev) or Colima (https://github.com/abiosoft/colima), start it, and run this again."
 		docker compose version >/dev/null 2>&1 || die "Docker has no compose plugin (docker compose). Docker Desktop and OrbStack include it; with Colima, install docker-compose (brew install docker-compose) and run this again."
 		docker info >/dev/null 2>&1 || die "Docker is not running, or this user cannot use it. Open Docker Desktop or OrbStack, or run colima start, then run this again."
 		vm="$(docker info --format '{{.MemTotal}}' 2>/dev/null | awk '{print int($1/1048576)}')" || vm=""
-		[ -z "$vm" ] || [ "$vm" = 0 ] || [ "$vm" -ge 1800 ] || warn "the container runtime has ${vm} MB of memory; Venom Cloud needs about 2 GB. Give it more (Docker Desktop: Settings, Resources; Colima: colima start --memory 4)."
+		[ -z "$vm" ] || [ "$vm" = 0 ] || [ "$vm" -ge 1800 ] || warn "the container runtime has ${vm} MB of memory; Petawork Cloud needs about 2 GB. Give it more (Docker Desktop: Settings, Resources; Colima: colima start --memory 4)."
 		return 0
 	fi
 	if ! command -v docker >/dev/null 2>&1; then
@@ -521,7 +521,7 @@ write_stack() {
 	[ "$p" != production ] || [ -n "$(ev VENOM_DATABASE_URL_UNPOOLED)" ] || setkey VENOM_DATABASE_URL_UNPOOLED "$(ev VENOM_DATABASE_URL)"
 	{
 		cat <<'EOF'
-# Venom Cloud (written by install-cloud.sh). Secrets and the image come from .env.
+# Petawork Cloud (written by install-cloud.sh). Secrets and the image come from .env.
 name: venom-cloud
 services:
 EOF
@@ -706,7 +706,7 @@ plist() { # LABEL SCHEDULE_XML LOG ARGS...
 	shift 3
 	printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>' \
 		'<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' \
-		'<!-- Venom Cloud (written by install-cloud.sh; venom-cloud uninstall removes it). -->' \
+		'<!-- Petawork Cloud (written by install-cloud.sh; venom-cloud uninstall removes it). -->' \
 		'<plist version="1.0">' '<dict>' \
 		"	<key>Label</key><string>$label</string>" \
 		'	<key>ProgramArguments</key>' '	<array>'
@@ -770,7 +770,7 @@ database_host() {
 	[ -n "$listen" ] || listen="$(first_ip)"
 	setkey DB_LISTEN "$listen"
 	cat >"$dir/docker-compose.yml" <<EOF
-# Postgres for a Venom Cloud on another server (written by install-cloud.sh --database-host).
+# Postgres for a Petawork Cloud on another server (written by install-cloud.sh --database-host).
 name: venom-db
 services:
   postgres:
@@ -800,7 +800,7 @@ EOF
 	fi
 	(cd "$dir" && { docker compose pull --quiet || true; } && docker compose up -d --wait) || die "Postgres did not become healthy. Look at: cd $dir && docker compose logs postgres"
 	say ""
-	say "Postgres for Venom Cloud is running on $listen:5432."
+	say "Postgres for Petawork Cloud is running on $listen:5432."
 	say "  On the app server: VENOM_DATABASE_URL=\"\$(cat database-url)\" sh install-cloud.sh --profile production"
 	say "  The URL, with its password, is in $dir/database-url (mode 600). Copy it over a channel you trust."
 	say "  Let only the app server reach port 5432 (a private network or a firewall rule): the traffic is not encrypted."
@@ -812,7 +812,7 @@ write_helper() {
 	mkdir -p "$dir/bin"
 	cat >"$dir/bin/venom-cloud.new" <<'HELPER_EOF'
 #!/bin/sh
-# venom-cloud: manage a Venom Cloud installed by install-cloud.sh.
+# venom-cloud: manage a Petawork Cloud installed by install-cloud.sh.
 #   venom-cloud status
 #   venom-cloud logs [SERVICE]       follow the logs (venom-cloud, postgres, ollama, caddy)
 #   venom-cloud backup [FILE]        a gzip'd SQL dump of the database (default BACKUP_DIR/venom-cloud-<time>.sql.gz)
@@ -1800,7 +1800,7 @@ if [ "$ollama_service" = 1 ] && [ -n "$ollama_model" ] && [ "$ollama_model" != n
 fi
 code="$(cd "$dir" && docker compose logs --no-log-prefix venom-cloud 2>&1 | grep -oE '[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}' | head -1 || true)"
 say ""
-say "Venom Cloud is running."
+say "Petawork Cloud is running."
 say "  Open:        $origin/setup"
 [ -z "$code" ] || say "  Setup code:  $code   (once; it stops working when the organisation exists)"
 [ -z "$email" ] || say "  Admin email: $email (enter it on the setup screen)"
